@@ -1,17 +1,17 @@
 @echo off
-echo Starting INSIGHT.AI...
+echo Starting Document Analysis RAG (local Ollama mode)...
 echo.
 
-REM Activate virtual environment
-call venv\Scripts\activate.bat
+REM Use the local Ollama model for answer generation (overrides .env for this session)
+set INSIGHT_LLM_PROVIDER=ollama
+set OLLAMA_MODEL=llama3.2:3b
+set OLLAMA_PLANNER_MODEL=llama3.2:3b
 
-REM Start Ollama if not already running
-start "" ollama serve
+REM Start Ollama in the background if it is not already running
+start "" /B ollama serve >nul 2>&1
 
-REM Wait a moment for Ollama to start
+REM Give Ollama a moment to come up
 timeout /t 3 /nobreak >nul
 
-REM Launch the Streamlit app
-streamlit run functions/dashboard.py
-
-pause
+REM Run the API in this window
+py -3.13 -m uvicorn functions.api:app --host 127.0.0.1 --port 8000

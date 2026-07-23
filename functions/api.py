@@ -1,43 +1,58 @@
 from __future__ import annotations
 
+import os
 import shutil
 import uuid
+from time import perf_counter
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-try:
-    from .chat_engine import ask_index_with_sources, retrieve_sources, setup_embeddings, setup_groq_llm
-    from .config import ensure_storage_dirs, get_uploads_dir
-    from .document_loader import load_documents
-    from .index_manager import build_index, load_index, load_registry, remove_index, sanitize_index_id, update_registry
-except ImportError:
-    from chat_engine import ask_index_with_sources, retrieve_sources, setup_embeddings, setup_groq_llm
-    from config import ensure_storage_dirs, get_uploads_dir
-    from document_loader import load_documents
-    from index_manager import build_index, load_index, load_registry, remove_index, sanitize_index_id, update_registry
+from .agent import run_agent
+
+from .rag import (
+    ask_index_with_sources,
+    build_index,
+    get_uploads_dir,
+    load_documents,
+    load_index,
+    load_registry,
+    remove_index,
+    retrieve_sources,
+    sanitize_index_id,
+    setup_embeddings,
+    setup_llm,
+    update_registry,
+)
+from .telemetry import log_query_result, summarize_events
 
 
 MAX_RETRIEVE_TOP_K = 20
+ALLOWED_UPLOAD_TYPES = {
+    ".pdf": {"application/pdf"},
+    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+}
 
 app = FastAPI(title="Document Analysis RAG API")
+
+
+class HistoryTurn(BaseModel):
+    role: str
+    content: str
 
 
 class ChatRequest(BaseModel):
     index_id: str
     message: str
+    history: list[HistoryTurn] = Field(default_factory=list)
 
 
 class RetrieveRequest(BaseModel):
     index_id: str
     query: str
     top_k: int = 5
-
-
-@app.on_event("startup")
-def startup() -> None:
-    ensure_storage_dirs()
 
 
 @app.get("/health")
@@ -55,24 +70,28 @@ def create_index(index_id: str | None = Form(default=None), files: list[UploadFi
     if not files:
         raise HTTPException(status_code=400, detail="At least one document is required")
 
+    validate_upload_metadata(files)
     safe_index_id = sanitize_index_id(_default_index_id(index_id, files))
-    upload_dir = _replace_upload_dir(safe_index_id)
-    _save_uploads(files, upload_dir)
-    raw_docs, warnings = load_documents(upload_dir)
-    if not raw_docs:
-        raise HTTPException(status_code=400, detail={"message": "No readable documents found", "warnings": warnings})
 
-    setup_embeddings()
-    build_index(raw_docs, safe_index_id)
-    metadata = update_registry(safe_index_id, upload_dir, raw_docs)
+    staging_dir = _new_staging_dir(safe_index_id)
+    try:
+        _save_uploads(files, staging_dir)
+        raw_docs, warnings = load_documents(staging_dir)
+        if not raw_docs:
+            raise HTTPException(status_code=400, detail={"message": "No readable documents found", "warnings": warnings})
+        setup_embeddings()
+        build_index(raw_docs, safe_index_id)
+        upload_dir = _promote_upload_dir(staging_dir, safe_index_id)
+        metadata = update_registry(safe_index_id, upload_dir, raw_docs)
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
     return {"index_id": safe_index_id, "documents": metadata["documents"], "warnings": warnings}
 
 
 @app.delete("/indexes/{index_id}")
 def delete_index(index_id: str) -> dict:
-    safe_index_id = sanitize_index_id(index_id)
-    if safe_index_id not in load_registry():
-        raise HTTPException(status_code=404, detail="Index not found")
+    safe_index_id = _existing_index_id(index_id)
     if not remove_index(safe_index_id):
         raise HTTPException(status_code=500, detail="Could not remove index")
     upload_dir = get_uploads_dir() / safe_index_id
@@ -85,34 +104,49 @@ def delete_index(index_id: str) -> dict:
 def chat(request: ChatRequest) -> dict:
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
-    safe_index_id = sanitize_index_id(request.index_id)
-    if safe_index_id not in load_registry():
-        raise HTTPException(status_code=404, detail="Index not found")
+    safe_index_id = _existing_index_id(request.index_id)
     try:
+        started = perf_counter()
         setup_embeddings()
-        setup_groq_llm()
+        setup_llm()
         index = load_index(safe_index_id)
-        result = ask_index_with_sources(index, request.message)
+        result = ask_index_with_sources(index, request.message, [turn.model_dump() for turn in request.history])
+        log_query_result(mode="single", iterations=1, latency_ms=(perf_counter() - started) * 1000)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
     return result
+
+
+@app.post("/agent")
+def agent(request: ChatRequest) -> dict:
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message is required")
+    safe_index_id = _existing_index_id(request.index_id)
+    try:
+        setup_embeddings()
+        index = load_index(safe_index_id)
+        return run_agent(index, request.message, [turn.model_dump() for turn in request.history])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Agent failed: {exc}") from exc
 
 
 @app.post("/retrieve")
 def retrieve(request: RetrieveRequest) -> dict:
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query is required")
-    safe_index_id = sanitize_index_id(request.index_id)
-    if safe_index_id not in load_registry():
-        raise HTTPException(status_code=404, detail="Index not found")
-    top_k = _clamp_top_k(request.top_k)
+    safe_index_id = _existing_index_id(request.index_id)
     try:
         setup_embeddings()
         index = load_index(safe_index_id)
-        sources = retrieve_sources(index, request.query, top_k=top_k)
+        sources = retrieve_sources(index, request.query, top_k=min(max(request.top_k, 1), MAX_RETRIEVE_TOP_K))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Retrieve failed: {exc}") from exc
     return {"sources": sources}
+
+
+@app.get("/metrics")
+def metrics() -> dict:
+    return summarize_events()
 
 
 def _default_index_id(index_id: str | None, files: list[UploadFile]) -> str:
@@ -122,22 +156,58 @@ def _default_index_id(index_id: str | None, files: list[UploadFile]) -> str:
     return Path(first_filename).stem
 
 
-def _replace_upload_dir(index_id: str) -> Path:
+def _new_staging_dir(index_id: str) -> Path:
+    staging_dir = get_uploads_dir() / f".incoming-{index_id}-{uuid.uuid4().hex}"
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    return staging_dir
+
+
+def _promote_upload_dir(staging_dir: Path, index_id: str) -> Path:
     upload_dir = get_uploads_dir() / index_id
     if upload_dir.exists():
         shutil.rmtree(upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir.replace(upload_dir)
     return upload_dir
 
 
 def _save_uploads(files: list[UploadFile], upload_dir: Path) -> None:
+    total = 0
+    limit = max_upload_bytes()
     for upload in files:
         if not upload.filename:
             continue
         destination = upload_dir / Path(upload.filename).name
         with destination.open("wb") as out_file:
-            shutil.copyfileobj(upload.file, out_file)
+            while chunk := upload.file.read(1024 * 1024):
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(status_code=413, detail="Combined uploads exceed the upload size limit")
+                out_file.write(chunk)
 
 
-def _clamp_top_k(value: int) -> int:
-    return min(max(value, 1), MAX_RETRIEVE_TOP_K)
+def _existing_index_id(index_id: str) -> str:
+    safe_index_id = sanitize_index_id(index_id)
+    if safe_index_id not in load_registry():
+        raise HTTPException(status_code=404, detail="Index not found")
+    return safe_index_id
+
+
+def validate_upload_metadata(files: list[UploadFile]) -> None:
+    limit = max_upload_bytes()
+    declared_total = 0
+    for upload in files:
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix not in ALLOWED_UPLOAD_TYPES:
+            raise HTTPException(status_code=415, detail=f"Unsupported file extension: {suffix or 'none'}")
+        if upload.content_type not in ALLOWED_UPLOAD_TYPES[suffix]:
+            raise HTTPException(status_code=415, detail=f"MIME type {upload.content_type or 'missing'} is not allowed for {suffix}")
+        if upload.size is not None:
+            if upload.size > limit:
+                raise HTTPException(status_code=413, detail=f"{upload.filename} exceeds the upload size limit")
+            declared_total += upload.size
+    if declared_total > limit:
+        raise HTTPException(status_code=413, detail="Combined uploads exceed the upload size limit")
+
+
+def max_upload_bytes() -> int:
+    return int(float(os.getenv("INSIGHT_MAX_UPLOAD_MB", "10")) * 1024 * 1024)

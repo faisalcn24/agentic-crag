@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 
 import openpyxl
 from docx import Document
 
-from functions.document_loader import load_document_file, load_documents
+from functions import rag
+from functions.rag import load_document_file, load_documents
 
 
 def test_load_docx(tmp_path: Path):
@@ -45,3 +47,15 @@ def test_unsupported_file_is_reported(tmp_path: Path):
 
     assert docs == []
     assert warnings == ["Skipped unsupported file: notes.txt"]
+
+
+def test_remove_index_removes_registry_entry_and_index_dir(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    index_dir = rag.get_indexes_dir() / "demo"
+    index_dir.mkdir(parents=True)
+    registry_file = tmp_path / "registry.json"
+    registry_file.write_text(json.dumps({"demo": {"documents": []}, "keep": {"documents": []}}), encoding="utf-8")
+
+    assert rag.remove_index("demo") is True
+    assert not index_dir.exists()
+    assert json.loads(registry_file.read_text(encoding="utf-8")) == {"keep": {"documents": []}}

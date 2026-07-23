@@ -1,0 +1,6 @@
+-r requirements.txt
+
+deepeval==4.1.2
+ragas==0.4.3
+pytest==9.0.2
+ruff==0.15.22
