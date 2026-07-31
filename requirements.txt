@@ -1,7 +1,6 @@
 fastapi==0.125.0
 uvicorn==0.38.0
 python-multipart==0.0.20
-langgraph==1.2.9
 mcp==1.28.1
 
 llama-index-core==0.14.19
@@ -12,3 +11,4 @@ openai==2.30.0
 pypdf==6.9.2
 python-docx==1.2.0
 openpyxl==3.1.5
+duckdb==1.5.5

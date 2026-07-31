@@ -41,7 +41,6 @@ Review `/opt/insight-ai/.env` after setup:
 INSIGHT_LLM_PROVIDER=ollama
 OLLAMA_MODEL=llama3.2:3b
 OLLAMA_PLANNER_MODEL=llama3.2:3b
-OLLAMA_JUDGE_MODEL=llama3.2:3b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_CONTEXT_WINDOW=8192
 INSIGHT_STORAGE_DIR=/opt/insight-ai/data
@@ -71,7 +70,8 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1/health
 ```
 
-Open `http://<ec2-public-ip>/docs` to use FastAPI's interactive API documentation.
+Open `http://<ec2-public-ip>/` for the graphical chat page or
+`http://<ec2-public-ip>/docs` for FastAPI's interactive API documentation.
 
 ## Operations
 

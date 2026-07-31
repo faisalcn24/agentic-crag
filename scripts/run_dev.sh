@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export INSIGHT_LLM_PROVIDER="${INSIGHT_LLM_PROVIDER:-ollama}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}"
-export OLLAMA_PLANNER_MODEL="${OLLAMA_PLANNER_MODEL:-llama3.2:3b}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$ROOT_DIR/venv/bin/python"
 
-exec python3 -m uvicorn functions.api:app --host 127.0.0.1 --port 8000
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="python3"
+fi
+
+cd "$ROOT_DIR"
+exec "$PYTHON" -m uvicorn functions.api:app --host 127.0.0.1 --port 8000

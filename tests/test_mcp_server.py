@@ -14,7 +14,7 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_mcp_lists_three_tools_and_collections_resource(monkeypatch):
+async def test_mcp_lists_two_tools_and_collections_resource(monkeypatch):
     monkeypatch.setattr(server, "load_registry", lambda: {"demo": {"documents": []}})
 
     async with create_connected_server_and_client_session(server.mcp) as session:
@@ -22,7 +22,7 @@ async def test_mcp_lists_three_tools_and_collections_resource(monkeypatch):
         resources = await session.list_resources()
         result = await session.read_resource("collections://all")
 
-    assert {tool.name for tool in tools.tools} == {"search_corpus", "answer_question", "inspect_retrieval"}
+    assert {tool.name for tool in tools.tools} == {"search_corpus", "answer_question"}
     assert [str(resource.uri) for resource in resources.resources] == ["collections://all"]
     assert json.loads(result.contents[0].text)["indexes"][0]["index_id"] == "demo"
 
@@ -30,7 +30,6 @@ async def test_mcp_lists_three_tools_and_collections_resource(monkeypatch):
 @pytest.mark.anyio
 async def test_search_corpus_runs_in_process(monkeypatch):
     monkeypatch.setattr(server, "load_registry", lambda: {"demo": {"documents": []}})
-    monkeypatch.setattr(server, "setup_embeddings", lambda: None)
     monkeypatch.setattr(server, "load_index", lambda _index_id: object())
     monkeypatch.setattr(
         server,

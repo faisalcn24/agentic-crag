@@ -20,25 +20,29 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Why:** Spreadsheet headers and rows need to remain together; prose benefits from smaller retrieval units.
 - **Rejected:** One chunk size for every format.
 
-## D-004: Local Ollama is the current execution mode
+## D-004: Local Ollama is the default execution mode
 
-- **Decision:** Use `llama3.2:3b` through Ollama for planning, sufficiency, answer synthesis, and the provisional judge.
-- **Why:** The user explicitly requested a fully local implementation for the current iteration. The default path makes no hosted model calls.
-- **Rejected for this scope:** Groq-hosted generation, a hosted stronger judge, the full judged scorecard, and model-routing cost optimization. The provider and evaluation hooks remain available, but only local smoke results are retained and no hosted or cost claims are made.
-- **Limitation:** The judge is not stronger than the answer model. Judge-based scores are provisional and may be noisy or flattering.
+- **Decision:** Use `llama3.2:3b` through Ollama for query planning and answer synthesis. Groq remains selectable by the tester/operator.
+- **Why:** The default path keeps generation local while preserving the requested provider-testing option.
+- **Rejected for this scope:** End-user provider switching and model-routing cost optimization.
 
-## D-005: Pin evaluation inputs and tolerate judge noise
+## D-005: Pin evaluation inputs and review answers directly
 
-- **Decision:** Keep versioned JSONL datasets, temperature 0 where supported, one fixed judge model, and a ±3 point comparison band.
-- **Why:** Exact pass thresholds make stochastic evaluations flaky.
-- **Rejected:** Regenerating questions per run or treating one-point changes as real.
+- **Decision:** Keep versioned JSONL datasets, save raw generated answers and retrieved sources, and inspect every answer against the expected answer and source text.
+- **Why:** Direct review makes failures understandable and avoids delegating acceptance to another model.
+- **Rejected:** Regenerating questions per run or using automated answer scores as current acceptance criteria. Automated scoring may be reconsidered later.
 
-## D-006: Use a bounded LangGraph around retrieval
+## D-006: Bound the retrieval workflow
 
-- **Decision:** Add a graph with at most four retrieval iterations, a 30-second response deadline, token accounting, and repeated-query detection.
-- **Why:** It adds agent behavior without replacing retrieval.
-- **Rejected:** An open-ended autonomous loop.
+- **Decision:** Retrieve exactly once for an ordinary standalone question. For a
+  recognized multi-hop question, perform one non-recursive decomposition into
+  two to four focused retrievals, then answer or partially abstain. Retain the
+  30-second response deadline and token accounting.
+- **Why:** The earlier sufficiency/reformulation loop terminated 58 of 60 agent cases through loop safeguards instead of normal answers.
+- **Rejected:** Model-controlled repeated retrieval and an open-ended autonomous loop.
 - **Limitation:** Python cannot safely kill a running synchronous provider call. The request returns at the deadline, but a non-cooperative call already running in the worker relies on its configured HTTP timeout.
+- **Implementation update:** D-013 removes the unnecessary graph framework while
+  retaining these bounds.
 
 ## D-007: Pin MCP to the current stable SDK
 
@@ -46,11 +50,15 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Why:** On 21 July 2026, Python SDK v2 is still beta and its targeted stable/spec date is in the future.
 - **Rejected for this scope:** Pinning `2.0.0b2`, claiming compatibility with the not-yet-published `2026-07-28` specification, or claiming verification from an external MCP host.
 
-## D-008: Keep the runtime surface API-only
+## D-008: Add a minimal bundled local UI
 
-- **Decision:** Retain FastAPI, upload type/size validation, and latency/iteration JSONL telemetry. Remove the Streamlit client, public demo/GIF, rate limiting, collection/spend caps, and automatic retention.
-- **Why:** The user selected an API-only minimal setup and explicitly kept only upload validation and performance telemetry.
-- **Rejected for this scope:** A bundled UI and operational controls that are not needed for the trusted local workflow. The deployment guide calls out the consequences of public exposure.
+- **Decision:** Serve one dependency-free HTML/CSS/JavaScript chat page from
+  FastAPI. It uses the existing collection, `/chat`, and `/agent` endpoints;
+  retain upload validation and latency/iteration JSONL telemetry.
+- **Why:** The project now needs a graphical recruiter demo, but not a second
+  frontend service or build toolchain.
+- **Rejected for this scope:** Restoring the old Streamlit client, adding a
+  JavaScript framework, or bundling unrelated public-deployment controls.
 
 ## D-009: Preserve honest project history
 
@@ -58,8 +66,44 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Why:** Six weeks of history cannot be truthfully produced in one implementation session.
 - **Rejected:** Fabricated timestamps or filler commits.
 
-## D-010: Isolate the RAGAS 0.4.3 legacy import
+## D-010: Constrain every model-generated control object
 
-- **Decision:** The eval runner installs a narrow runtime alias for `langchain_community.chat_models.vertexai` before importing RAGAS.
-- **Why:** RAGAS 0.4.3 imports that removed legacy module even though the selected local OpenAI-compatible Ollama adapter does not use Vertex AI. Current LangGraph requires the newer LangChain dependency line, so downgrading the transitive stack would break the agent pin.
-- **Rejected:** Adding another top-level dependency, downgrading LangGraph, or silently omitting RAGAS metrics.
+- **Decision:** Request provider-native JSON schemas for conversational query
+  planning, spreadsheet plans, and multi-hop decomposition; validate every
+  response and use a deterministic fallback on failure.
+- **Why:** Small local models were unreliable when JSON structure was requested
+  only in prose.
+- **Rejected:** Trusting unrestricted JSON, adding repair loops, or introducing
+  another constrained-generation dependency before native schemas fail.
+
+## D-011: Compile spreadsheet operations instead of executing model SQL
+
+- **Decision:** Represent spreadsheet questions with a small validated operation
+  plan and compile supported operations to parameterized in-memory DuckDB SQL.
+- **Why:** Counts, filters, comparisons, grouping, and numeric conversions need
+  deterministic table semantics rather than prose synthesis.
+- **Rejected:** Executing arbitrary SQL generated by a model or replacing
+  semantic workbook discovery with a separate permanent database.
+
+## D-012: Use bounded decomposition for multi-document questions
+
+- **Decision:** Decompose recognized complex questions once into two to four
+  independent evidence queries, track missing evidence, and synthesize only from
+  the resulting excerpts.
+- **Why:** One broad query can retrieve the right documents without exposing all
+  required facts to the answer step.
+- **Rejected:** Recursive agents, open-ended planning, and an indexing migration
+  while source recall remains 100%.
+
+## D-013: Keep startup lazy and orchestration direct
+
+- **Decision:** Cache embeddings, provider configurations, and loaded indexes at
+  their owning RAG boundaries. Run the bounded retrieval workflow directly and
+  expose one MCP retrieval tool instead of equivalent search/inspection aliases.
+- **Why:** The workflow is linear, non-recursive, and has no durable graph state.
+  Recreating models and reopening an unchanged index for every request added
+  latency without changing results, while duplicate MCP tools exposed the same
+  reranked retrieval behavior under different names.
+- **Rejected:** Eager model loading that delays the health/UI endpoints, a cache
+  registry abstraction for three small caches, and merging retrieval,
+  grounding, spreadsheet, and multi-hop responsibilities into one module.

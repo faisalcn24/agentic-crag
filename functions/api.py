@@ -7,6 +7,7 @@ from time import perf_counter
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .agent import run_agent
@@ -21,14 +22,12 @@ from .rag import (
     remove_index,
     retrieve_sources,
     sanitize_index_id,
-    setup_embeddings,
-    setup_llm,
     update_registry,
 )
 from .telemetry import log_query_result, summarize_events
 
 
-MAX_RETRIEVE_TOP_K = 20
+CHAT_PAGE = Path(__file__).with_name("static") / "chat.html"
 ALLOWED_UPLOAD_TYPES = {
     ".pdf": {"application/pdf"},
     ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
@@ -55,6 +54,11 @@ class RetrieveRequest(BaseModel):
     top_k: int = 5
 
 
+@app.get("/", include_in_schema=False)
+def chat_page() -> FileResponse:
+    return FileResponse(CHAT_PAGE)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -79,7 +83,6 @@ def create_index(index_id: str | None = Form(default=None), files: list[UploadFi
         raw_docs, warnings = load_documents(staging_dir)
         if not raw_docs:
             raise HTTPException(status_code=400, detail={"message": "No readable documents found", "warnings": warnings})
-        setup_embeddings()
         build_index(raw_docs, safe_index_id)
         upload_dir = _promote_upload_dir(staging_dir, safe_index_id)
         metadata = update_registry(safe_index_id, upload_dir, raw_docs)
@@ -107,8 +110,6 @@ def chat(request: ChatRequest) -> dict:
     safe_index_id = _existing_index_id(request.index_id)
     try:
         started = perf_counter()
-        setup_embeddings()
-        setup_llm()
         index = load_index(safe_index_id)
         result = ask_index_with_sources(index, request.message, [turn.model_dump() for turn in request.history])
         log_query_result(mode="single", iterations=1, latency_ms=(perf_counter() - started) * 1000)
@@ -123,7 +124,6 @@ def agent(request: ChatRequest) -> dict:
         raise HTTPException(status_code=400, detail="Message is required")
     safe_index_id = _existing_index_id(request.index_id)
     try:
-        setup_embeddings()
         index = load_index(safe_index_id)
         return run_agent(index, request.message, [turn.model_dump() for turn in request.history])
     except Exception as exc:
@@ -136,9 +136,8 @@ def retrieve(request: RetrieveRequest) -> dict:
         raise HTTPException(status_code=400, detail="Query is required")
     safe_index_id = _existing_index_id(request.index_id)
     try:
-        setup_embeddings()
         index = load_index(safe_index_id)
-        sources = retrieve_sources(index, request.query, top_k=min(max(request.top_k, 1), MAX_RETRIEVE_TOP_K))
+        sources = retrieve_sources(index, request.query, top_k=request.top_k)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Retrieve failed: {exc}") from exc
     return {"sources": sources}

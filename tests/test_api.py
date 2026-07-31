@@ -4,9 +4,13 @@ from io import BytesIO
 
 import pytest
 from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 
-from functions.api import validate_upload_metadata
+from functions.api import app, validate_upload_metadata
+
+
+client = TestClient(app)
 
 
 def upload(filename: str, content_type: str, size: int = 3) -> UploadFile:
@@ -16,6 +20,15 @@ def upload(filename: str, content_type: str, size: int = 3) -> UploadFile:
         size=size,
         headers=Headers({"content-type": content_type}),
     )
+
+
+def test_root_serves_graphical_chat_page():
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "INSIGHT AI" in response.text
+    assert 'fetch(`/${elements.mode.value}`' in response.text
 
 
 def test_upload_allowlist_accepts_pdf_docx_and_xlsx():
