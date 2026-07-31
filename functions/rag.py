@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
 import threading
+from collections import Counter
 from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from weakref import WeakKeyDictionary
 
 import openpyxl
 from docx import Document
@@ -29,6 +33,9 @@ from llama_index.core.llms import (
 )
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SentenceTransformerRerank
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.retrievers import BaseRetriever
+from llama_index.core.schema import NodeWithScore, QueryBundle
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from openai import OpenAI
 from pypdf import PdfReader
@@ -53,7 +60,8 @@ DEFAULT_STORAGE_DIR = Path.home() / "INSIGHT_AI_storage"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", *IMAGE_EXTENSIONS}
 
 TEXT_CHUNK_SIZE = 500
 TEXT_CHUNK_OVERLAP = 50
@@ -65,6 +73,9 @@ SPREADSHEET_CHUNK_OVERLAP = 0
 RERANKER_MODEL = "BAAI/bge-reranker-base"
 RETRIEVE_TOP_K = 20  # candidates pulled from the vector store before re-ranking
 RERANK_TOP_N = 5  # chunks kept after re-ranking and sent to the LLM
+OCR_DPI = 200
+MIN_PDF_TEXT_CHARACTERS = 20
+RRF_K = 60
 MAX_SOURCE_TEXT_CHARS = 2400
 MAX_SPREADSHEET_SOURCE_TEXT_CHARS = 6000
 STRUCTURED_OUTPUT_SCHEMAS = {
@@ -149,6 +160,14 @@ class GroqCompatibleLLM(CustomLLM):
         self, prompt: str, formatted: bool = False, **kwargs: Any
     ) -> Generator[CompletionResponse, None, None]:
         yield self.complete(prompt, formatted=formatted, **kwargs)
+
+
+@dataclass
+class _KeywordCorpus:
+    nodes: list[Any]
+    token_counts: list[Counter[str]]
+    document_frequencies: Counter[str]
+    average_length: float
 
 
 def load_dotenv_file(path: str | Path | None = None) -> None:
@@ -237,6 +256,8 @@ def load_document_file(filepath: str | Path) -> list[dict]:
         return _single_document(path, _load_pdf_text(path), "pdf")
     if suffix == ".xlsx":
         return _load_workbook_docs(path)
+    if suffix in IMAGE_EXTENSIONS:
+        return _single_document(path, _ocr_image_text(path), "image")
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
@@ -254,6 +275,9 @@ def build_index(raw_docs: list[dict], index_id: str):
     index = VectorStoreIndex(nodes, show_progress=True)
     index.storage_context.persist(persist_dir=str(index_dir))
     with _runtime_lock:
+        previous = _loaded_indexes.get(str(index_dir.resolve()))
+        if previous:
+            _keyword_indexes.pop(previous[1], None)
         _loaded_indexes[str(index_dir.resolve())] = (
             index_dir.stat().st_mtime_ns,
             index,
@@ -270,6 +294,8 @@ def load_index(index_id: str):
         cached = _loaded_indexes.get(cache_key)
         if cached and cached[0] == signature:
             return cached[1]
+        if cached:
+            _keyword_indexes.pop(cached[1], None)
         storage = StorageContext.from_defaults(persist_dir=str(index_dir))
         index = load_index_from_storage(storage)
         _loaded_indexes[cache_key] = (signature, index)
@@ -280,7 +306,9 @@ def remove_index(index_id: str) -> bool:
     try:
         index_dir = get_indexes_dir() / sanitize_index_id(index_id)
         with _runtime_lock:
-            _loaded_indexes.pop(str(index_dir.resolve()), None)
+            cached = _loaded_indexes.pop(str(index_dir.resolve()), None)
+            if cached:
+                _keyword_indexes.pop(cached[1], None)
         if index_dir.exists():
             shutil.rmtree(index_dir, ignore_errors=True)
         registry = load_registry()
@@ -307,8 +335,10 @@ def update_registry(index_id: str, folder_path: Path, raw_docs: list[dict]) -> d
 
 _runtime_lock = threading.Lock()
 _embedding_model = None
+_ocr_engine = None
 _llms: dict[tuple[str, ...], Any] = {}
 _loaded_indexes: dict[str, tuple[int, Any]] = {}
+_keyword_indexes: WeakKeyDictionary[Any, _KeywordCorpus] = WeakKeyDictionary()
 
 
 def setup_embeddings() -> None:
@@ -462,9 +492,8 @@ def ask_index_with_sources(
     index, message: str, history: list[dict] | None = None
 ) -> dict[str, Any]:
     setup_llm()
-    query_engine = index.as_query_engine(
-        similarity_top_k=RETRIEVE_TOP_K,
-        node_postprocessors=[get_reranker()],
+    query_engine = RetrieverQueryEngine.from_args(
+        retriever=_HybridRetriever(index, RERANK_TOP_N),
         text_qa_template=QA_PROMPT,
     )
     chat_history = _to_chat_messages(history)
@@ -859,13 +888,139 @@ def retrieve_sources(
     index, query: str, top_k: int = RERANK_TOP_N
 ) -> list[dict[str, Any]]:
     top_k = min(max(int(top_k), 1), RETRIEVE_TOP_K)
-    candidates = index.as_retriever(
-        similarity_top_k=max(RETRIEVE_TOP_K, top_k)
-    ).retrieve(query)
+    reranked = _retrieve_hybrid_nodes(index, query, top_k)
+    return format_source_nodes(reranked, query=query)
+
+
+class _HybridRetriever(BaseRetriever):
+    def __init__(self, index, top_k: int):
+        super().__init__()
+        self._index = index
+        self._top_k = top_k
+
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        return _retrieve_hybrid_nodes(
+            self._index, query_bundle.query_str, self._top_k
+        )
+
+
+def _retrieve_hybrid_nodes(index, query: str, top_k: int) -> list[NodeWithScore]:
+    candidates = _hybrid_candidates(index, query, RETRIEVE_TOP_K)
     reranked = get_reranker(top_n=RETRIEVE_TOP_K).postprocess_nodes(
         candidates, query_str=query
     )
-    return format_source_nodes(reranked[:top_k], query=query)
+    return _promote_exact_identifier_matches(reranked, query)[:top_k]
+
+
+def _hybrid_candidates(index, query: str, top_k: int) -> list[NodeWithScore]:
+    vector_nodes = index.as_retriever(similarity_top_k=top_k).retrieve(query)
+    keyword_nodes = _bm25_candidates(index, query, top_k)
+    return _reciprocal_rank_fusion(vector_nodes, keyword_nodes, top_k)
+
+
+def _bm25_candidates(index, query: str, top_k: int) -> list[NodeWithScore]:
+    query_tokens = set(_search_tokens(query))
+    if not query_tokens:
+        return []
+
+    corpus = _get_keyword_corpus(index)
+    document_count = len(corpus.nodes)
+    if not document_count:
+        return []
+
+    ranked = []
+    for node, counts in zip(corpus.nodes, corpus.token_counts, strict=True):
+        document_length = sum(counts.values())
+        score = 0.0
+        for token in query_tokens:
+            frequency = counts.get(token, 0)
+            if not frequency:
+                continue
+            document_frequency = corpus.document_frequencies[token]
+            inverse_frequency = math.log(
+                1 + (document_count - document_frequency + 0.5)
+                / (document_frequency + 0.5)
+            )
+            length_ratio = document_length / corpus.average_length
+            score += inverse_frequency * (frequency * 2.2) / (
+                frequency + 1.2 * (0.25 + 0.75 * length_ratio)
+            )
+        if score:
+            ranked.append(NodeWithScore(node=node, score=score))
+    return sorted(ranked, key=lambda item: item.score or 0, reverse=True)[:top_k]
+
+
+def _get_keyword_corpus(index) -> _KeywordCorpus:
+    with _runtime_lock:
+        cached = _keyword_indexes.get(index)
+    if cached:
+        return cached
+
+    nodes = [
+        node
+        for node in index.docstore.docs.values()
+        if _node_text(node).strip()
+    ]
+    token_counts = [Counter(_search_tokens(_node_text(node))) for node in nodes]
+    document_frequencies: Counter[str] = Counter()
+    for counts in token_counts:
+        document_frequencies.update(counts.keys())
+    average_length = (
+        sum(sum(counts.values()) for counts in token_counts) / len(token_counts)
+        if token_counts
+        else 1.0
+    )
+    corpus = _KeywordCorpus(
+        nodes=nodes,
+        token_counts=token_counts,
+        document_frequencies=document_frequencies,
+        average_length=average_length,
+    )
+    with _runtime_lock:
+        return _keyword_indexes.setdefault(index, corpus)
+
+
+def _search_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+(?:[-_.:/][a-z0-9]+)*", text.casefold())
+
+
+def _reciprocal_rank_fusion(
+    vector_nodes: list[NodeWithScore],
+    keyword_nodes: list[NodeWithScore],
+    top_k: int,
+) -> list[NodeWithScore]:
+    scores: dict[str, float] = {}
+    nodes: dict[str, Any] = {}
+    for results in (vector_nodes, keyword_nodes):
+        for rank, result in enumerate(results, start=1):
+            node = result.node
+            node_id = node.node_id
+            nodes[node_id] = node
+            scores[node_id] = scores.get(node_id, 0.0) + 1 / (RRF_K + rank)
+    ranked_ids = sorted(scores, key=scores.get, reverse=True)[:top_k]
+    return [
+        NodeWithScore(node=nodes[node_id], score=scores[node_id])
+        for node_id in ranked_ids
+    ]
+
+
+def _promote_exact_identifier_matches(
+    nodes: list[NodeWithScore], query: str
+) -> list[NodeWithScore]:
+    identifiers = {
+        token
+        for token in _search_tokens(query)
+        if any(char.isalpha() for char in token)
+        and any(char.isdigit() for char in token)
+    }
+    if not identifiers:
+        return nodes
+    return sorted(
+        nodes,
+        key=lambda item: not identifiers.intersection(
+            _search_tokens(_node_text(item.node))
+        ),
+    )
 
 
 def format_source_nodes(source_nodes, query: str | None = None) -> list[dict[str, Any]]:
@@ -945,7 +1100,61 @@ def _load_docx_text(path: Path) -> str:
 
 def _load_pdf_text(path: Path) -> str:
     reader = PdfReader(str(path))
-    return "\n".join(text for page in reader.pages if (text := page.extract_text()))
+    page_texts = [(page.extract_text() or "").strip() for page in reader.pages]
+    missing_pages = [
+        page_number
+        for page_number, text in enumerate(page_texts)
+        if len(re.findall(r"\w", text)) < MIN_PDF_TEXT_CHARACTERS
+    ]
+    if missing_pages:
+        for page_number, ocr_text in _ocr_pdf_pages(path, missing_pages).items():
+            if len(ocr_text) > len(page_texts[page_number]):
+                page_texts[page_number] = ocr_text
+
+    if len(page_texts) == 1:
+        return page_texts[0]
+    return "\n\n".join(
+        f"Page {page_number}:\n{text}"
+        for page_number, text in enumerate(page_texts, start=1)
+        if text
+    )
+
+
+def _ocr_pdf_pages(path: Path, page_numbers: list[int]) -> dict[int, str]:
+    import pypdfium2 as pdfium
+
+    results = {}
+    with pdfium.PdfDocument(path) as pdf:
+        for page_number in page_numbers:
+            page = pdf[page_number]
+            bitmap = page.render(scale=OCR_DPI / 72)
+            image = bitmap.to_pil()
+            try:
+                results[page_number] = _ocr_image_text(image)
+            finally:
+                image.close()
+                bitmap.close()
+                page.close()
+    return results
+
+
+def _ocr_image_text(image: Any) -> str:
+    result = _get_ocr_engine()(image)
+    return "\n".join(text.strip() for text in (result.txts or ()) if text.strip())
+
+
+def _get_ocr_engine():
+    global _ocr_engine
+    with _runtime_lock:
+        if _ocr_engine is None:
+            _ocr_engine = _build_ocr_engine()
+        return _ocr_engine
+
+
+def _build_ocr_engine():
+    from rapidocr import RapidOCR
+
+    return RapidOCR()
 
 
 def _load_workbook_docs(path: Path) -> list[dict]:

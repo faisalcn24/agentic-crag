@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
+from PIL import Image, ImageDraw, ImageFont
 
 from functions import rag
 from functions.agent import run_agent
@@ -12,6 +13,26 @@ from functions.agent import run_agent
 
 RUN_LIVE_QUALITY_TESTS = os.getenv("INSIGHT_RUN_LIVE_QUALITY_TESTS") == "1"
 ABSTENTION = "The answer is not present in the provided documents."
+
+
+def test_real_ocr_reads_image_and_scanned_pdf(tmp_path: Path):
+    image_path = tmp_path / "asset.png"
+    image = Image.new("RGB", (1200, 240), "white")
+    ImageDraw.Draw(image).text(
+        (40, 70),
+        "ASSET ZX-9001 COBALT",
+        fill="black",
+        font=ImageFont.load_default(size=64),
+    )
+    image.save(image_path)
+
+    image_docs = rag.load_document_file(image_path)
+    assert "ZX-9001" in image_docs[0]["text"]
+
+    pdf_path = tmp_path / "scan.pdf"
+    image.save(pdf_path, "PDF", resolution=150)
+    pdf_docs = rag.load_document_file(pdf_path)
+    assert "ZX-9001" in pdf_docs[0]["text"]
 
 
 def test_pdf_extraction_reads_embedded_text(tmp_path: Path):

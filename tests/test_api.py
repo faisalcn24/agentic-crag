@@ -31,11 +31,15 @@ def test_root_serves_graphical_chat_page():
     assert 'fetch(`/${elements.mode.value}`' in response.text
 
 
-def test_upload_allowlist_accepts_pdf_docx_and_xlsx():
+def test_upload_allowlist_accepts_documents_and_images():
     validate_upload_metadata([
         upload("one.pdf", "application/pdf"),
         upload("two.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         upload("three.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        upload("four.png", "image/png"),
+        upload("five.jpg", "image/jpeg"),
+        upload("six.tiff", "image/tiff"),
+        upload("seven.webp", "image/webp"),
     ])
 
 

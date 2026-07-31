@@ -107,3 +107,17 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Rejected:** Eager model loading that delays the health/UI endpoints, a cache
   registry abstraction for three small caches, and merging retrieval,
   grounding, spreadsheet, and multi-hop responsibilities into one module.
+
+## D-014: Add local fallback OCR and hybrid retrieval
+
+- **Decision:** Keep pypdf for normal PDF extraction, invoke RapidOCR through
+  ONNX Runtime only for direct image inputs or PDF pages with insufficient
+  embedded text, and render those PDF pages with PDFium. Rank persisted chunks
+  independently with BM25 and vector similarity, combine them with reciprocal
+  rank fusion, then apply the existing cross-encoder reranker.
+- **Why:** Text PDFs retain their fast path, OCR remains local and lazy, and
+  exact identifiers can enter the candidate set without replacing the current
+  persisted index or embedding model.
+- **Rejected:** Requiring a system Tesseract installation, sending images to a
+  hosted vision model, adding a second search service, or rebuilding every
+  existing index solely to enable keyword retrieval.

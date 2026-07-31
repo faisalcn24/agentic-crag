@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import openpyxl
 from docx import Document
+from llama_index.core.schema import NodeWithScore, TextNode
 
 from functions import rag
 from functions.rag import load_document_file, load_documents
@@ -125,6 +126,53 @@ def test_load_xlsx(tmp_path: Path):
     assert "Item: Hosting | Amount: 25" in docs[0]["text"]
 
 
+def test_load_image_uses_ocr(tmp_path: Path, monkeypatch):
+    path = tmp_path / "label.png"
+    path.write_bytes(b"image bytes")
+    monkeypatch.setattr(rag, "_ocr_image_text", lambda image: "Asset ID ZX-9001")
+
+    docs = load_document_file(path)
+
+    assert docs == [
+        {
+            "filename": "label.png",
+            "text": "Document filename: label.png\n\nAsset ID ZX-9001",
+            "type": "image",
+        }
+    ]
+
+
+def test_scanned_pdf_pages_fall_back_to_ocr(tmp_path: Path, monkeypatch):
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(b"pdf bytes")
+    pages = [
+        SimpleNamespace(extract_text=lambda: "Embedded text is already long enough to keep."),
+        SimpleNamespace(extract_text=lambda: ""),
+    ]
+    monkeypatch.setattr(rag, "PdfReader", lambda _path: SimpleNamespace(pages=pages))
+    monkeypatch.setattr(
+        rag,
+        "_ocr_pdf_pages",
+        lambda _path, page_numbers: {page_numbers[0]: "Scanned asset ZX-9001"},
+    )
+
+    docs = load_document_file(path)
+
+    assert "Page 1:\nEmbedded text is already long enough to keep." in docs[0]["text"]
+    assert "Page 2:\nScanned asset ZX-9001" in docs[0]["text"]
+
+
+def test_ocr_engine_is_loaded_once(monkeypatch):
+    engines = []
+    monkeypatch.setattr(rag, "_ocr_engine", None)
+    monkeypatch.setattr(
+        rag, "_build_ocr_engine", lambda: engines.append(object()) or engines[-1]
+    )
+
+    assert rag._get_ocr_engine() is rag._get_ocr_engine()
+    assert len(engines) == 1
+
+
 def test_unsupported_file_is_reported(tmp_path: Path):
     (tmp_path / "notes.txt").write_text("ignore me", encoding="utf-8")
 
@@ -232,15 +280,15 @@ def test_answer_entrypoint_configures_llm_it_uses(monkeypatch):
         def query(_message):
             return Response()
 
-    class Index:
+    class QueryEngineFactory:
         @staticmethod
-        def as_query_engine(**_kwargs):
+        def from_args(**_kwargs):
             return Engine()
 
     monkeypatch.setattr(rag, "setup_llm", lambda: configured.append(True))
-    monkeypatch.setattr(rag, "get_reranker", lambda: object())
+    monkeypatch.setattr(rag, "RetrieverQueryEngine", QueryEngineFactory)
 
-    result = rag.ask_index_with_sources(Index(), "Unknown fact?")
+    result = rag.ask_index_with_sources(object(), "Unknown fact?")
 
     assert configured == [True]
     assert result["answer"] == "The answer is not present in the provided documents."
@@ -567,14 +615,17 @@ def test_formatted_spreadsheet_source_preserves_rows_and_full_sheet():
 
 def test_agent_retrieval_fetches_wide_candidates_then_reranks(monkeypatch):
     calls = {}
+    candidate = NodeWithScore(node=TextNode(text="semantic candidate"), score=0.8)
 
     class Retriever:
         @staticmethod
         def retrieve(query):
             calls["retrieve_query"] = query
-            return ["candidate"]
+            return [candidate]
 
     class Index:
+        docstore = SimpleNamespace(docs={})
+
         @staticmethod
         def as_retriever(similarity_top_k):
             calls["similarity_top_k"] = similarity_top_k
@@ -593,12 +644,56 @@ def test_agent_retrieval_fetches_wide_candidates_then_reranks(monkeypatch):
     monkeypatch.setattr(rag, "get_reranker", get_reranker)
 
     assert rag.retrieve_sources(Index(), "FR-006", top_k=5) == []
-    assert calls == {
-        "similarity_top_k": rag.RETRIEVE_TOP_K,
-        "retrieve_query": "FR-006",
-        "top_n": rag.RETRIEVE_TOP_K,
-        "rerank": (["candidate"], "FR-006"),
-    }
+    assert calls["similarity_top_k"] == rag.RETRIEVE_TOP_K
+    assert calls["retrieve_query"] == "FR-006"
+    assert calls["top_n"] == rag.RETRIEVE_TOP_K
+    fused, rerank_query = calls["rerank"]
+    assert rerank_query == "FR-006"
+    assert [item.node_id for item in fused] == [candidate.node_id]
+
+
+def test_hybrid_retrieval_promotes_exact_identifier(monkeypatch):
+    semantic = TextNode(
+        text="A general deployment configuration overview.",
+        metadata={"filename": "overview.docx", "type": "docx"},
+    )
+    exact = TextNode(
+        text="Asset ZX-9001 belongs to the cobalt configuration.",
+        metadata={"filename": "assets.docx", "type": "docx"},
+    )
+
+    class Retriever:
+        @staticmethod
+        def retrieve(_query):
+            return [NodeWithScore(node=semantic, score=0.99)]
+
+    class Index:
+        docstore = SimpleNamespace(
+            docs={semantic.node_id: semantic, exact.node_id: exact}
+        )
+
+        @staticmethod
+        def as_retriever(similarity_top_k):
+            assert similarity_top_k == rag.RETRIEVE_TOP_K
+            return Retriever()
+
+    class Reranker:
+        @staticmethod
+        def postprocess_nodes(nodes, query_str):
+            assert query_str == "Which configuration belongs to ZX-9001?"
+            return nodes
+
+    monkeypatch.setattr(rag, "_keyword_indexes", {})
+    monkeypatch.setattr(rag, "get_reranker", lambda top_n: Reranker())
+
+    sources = rag.retrieve_sources(
+        Index(), "Which configuration belongs to ZX-9001?", top_k=2
+    )
+
+    assert [source["filename"] for source in sources] == [
+        "assets.docx",
+        "overview.docx",
+    ]
 
 
 def test_spreadsheet_excerpt_keeps_rows_relevant_to_query():

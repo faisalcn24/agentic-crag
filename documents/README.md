@@ -2,6 +2,10 @@
 
 This folder contains synthetic public/demo documents for testing Document Analysis RAG. The files are intentionally overlapping and moderately long so retrieval, citations, numeric lookup, comparison, and abstention behavior can be tested.
 
+The corpus describes a historical 2.4 demo release. Its statements about OCR,
+reranking, and hybrid retrieval are evidence fixtures, not documentation of the
+current application runtime.
+
 ## Files
 
 - `01_product_requirements.docx`

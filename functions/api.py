@@ -32,6 +32,13 @@ ALLOWED_UPLOAD_TYPES = {
     ".pdf": {"application/pdf"},
     ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
     ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    ".png": {"image/png"},
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".tif": {"image/tiff"},
+    ".tiff": {"image/tiff"},
+    ".bmp": {"image/bmp", "image/x-ms-bmp"},
+    ".webp": {"image/webp"},
 }
 
 app = FastAPI(title="Document Analysis RAG API")

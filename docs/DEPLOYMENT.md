@@ -1,6 +1,9 @@
-# Document Analysis RAG on AWS
+# AWS deployment
 
-The API can run on one Ubuntu EC2 instance. FastAPI, document parsing, embeddings, persisted vector indexes, retrieval, and the default Ollama `llama3.2:3b` model all run on the instance. Groq remains an optional provider; when enabled, retrieved excerpts leave the instance.
+The API can run on one Ubuntu EC2 instance. FastAPI, document parsing,
+embeddings, persisted vector indexes, retrieval, and the default Ollama
+`llama3.2:3b` model all run on the instance. Groq remains optional; when
+enabled, questions and retrieved excerpts leave the instance.
 
 ## Architecture
 
@@ -96,4 +99,7 @@ The update script also disables and removes legacy `insight-ui` and `insight-ret
 - `POST /retrieve` with `index_id`, `query`, and `top_k`
 - `GET /metrics`
 
-Uploads are restricted to PDF, DOCX, and XLSX with a 10 MB combined request limit by default. Uploaded files and indexes persist until explicitly deleted through the API or removed by an operator.
+Uploads are restricted to PDF, DOCX, XLSX, PNG, JPEG, TIFF, BMP, and WebP with a
+10 MB combined request limit by default. OCR and hybrid BM25/vector retrieval
+run locally on the instance. Uploaded files and indexes persist until explicitly
+deleted through the API or removed by an operator.

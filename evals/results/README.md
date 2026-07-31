@@ -5,10 +5,9 @@ generated answer, expected answer, retrieved sources, citations,
 expected-source recall, prompt-injection flags, and agent termination data.
 
 The latest complete directly reviewed comparison is
-`eval-20260730T223145Z.json`. Its top-level `manual_review` object records the
-retained run, every targeted post-fix recheck, and the current acceptance
-summary. The original answers are retained even when a later targeted recheck
-fixed a failure.
+`eval-20260731T114721Z.json`. Its top-level `manual_review` object records the
+direct inspection and acceptance summary for the complete post-OCR and
+post-hybrid-retrieval run.
 
 Only this final reviewed comparison is retained; superseded smoke and
 intermediate runs are intentionally excluded.

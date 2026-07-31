@@ -7,10 +7,10 @@ golden cases are run through both `/chat` and `/agent`, producing 120 answer
 outputs: 20 single-hop, 15 multi-hop, 15 spreadsheet, and 10 unanswerable cases
 per path.
 
-The latest complete retained comparison is
-`evals/results/eval-20260730T223145Z.json`. Its `manual_review` object preserves
-the direct-review findings and the targeted rechecks made after the last
-query-time fixes.
+The latest complete retained answer comparison is
+`evals/results/eval-20260731T114721Z.json`. Its `manual_review` object records
+the direct inspection of all 120 golden answers and all 20 adversarial answers
+generated after the OCR and hybrid BM25/vector retrieval change.
 
 | Release gate | Current result | Target |
 | --- | ---: | ---: |
@@ -24,14 +24,12 @@ query-time fixes.
 | Structured control outputs | all schemas and fallbacks pass | 100% handled |
 | Ordinary agent retrievals | exactly one | exactly one |
 | Adversarial cases | 20/20 | regression baseline |
-| Code tests | 123 passed, 2 opt-in live tests skipped | all default tests pass |
+| Code tests | 128 passed, 2 opt-in live tests skipped | all default tests pass |
 
 The citation count is 52 because eight golden cases correctly abstain without
 making a positive factual claim. All 52 factual answers in each path cite text
-that directly supports the claims. The current 60/60 answer counts combine the
-retained full run with live rechecks of every retained failure after the final
-query-time fixes; the original generated outputs remain unchanged in the result
-file for auditability.
+that directly supports the claims. The current 60/60 answer counts come from
+the retained full run itself; no targeted recheck was needed.
 
 ## Methodology
 
@@ -50,6 +48,23 @@ agent execution failure. The directly reviewed answer itself, rather than a
 similarity score or model judge, is the acceptance criterion.
 
 ## Review history
+
+### 31 July OCR and hybrid-retrieval review
+
+After adding local OCR and BM25/vector reciprocal-rank fusion, the complete
+comparison was regenerated with local Ollama `llama3.2:3b` against the same
+persisted demo corpus. Direct review passed all 60 normal-RAG answers, all 60
+agent answers, and all 20 adversarial answers. Expected-source recall remained
+100% for both golden paths.
+
+All 52 factual answers in each path used directly supporting citations; the
+other eight answers in each path were exact abstentions. All 10 unanswerable
+cases behaved correctly, including two evidence-backed feature-boundary
+corrections. The 15 spreadsheet cases and 15 agent multi-hop cases passed. All
+45 ordinary agent cases retrieved exactly once; the multi-hop cases used two to
+four retrievals. All eight retrieved prompt-injection cases were flagged and
+answered from genuine corpus evidence. There were no provider, generation, or
+termination errors.
 
 ### 31 July completeness regression review
 
@@ -126,6 +141,8 @@ live Groq answer run was not performed because no Groq API key was configured.
   production documents.
 - Direct review is deliberate but must be repeated when sources, prompts,
   routing, extraction, or synthesis behavior changes.
+- OCR quality is verified on generated printed text, not arbitrary scans,
+  handwriting, unusual layouts, or every supported image format.
 - Clean Linux/CI, optional AWS deployment, and an external MCP host remain
   environment checks rather than local answer-quality work.
 - Groq has contract-level coverage only in this review; a tester selecting Groq
