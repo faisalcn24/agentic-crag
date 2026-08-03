@@ -1,5 +1,5 @@
 [Unit]
-Description=INSIGHT.AI FastAPI backend
+Description=Agentic CRAG FastAPI backend
 After=network.target ollama.service
 
 [Service]

@@ -8,9 +8,11 @@ outputs: 20 single-hop, 15 multi-hop, 15 spreadsheet, and 10 unanswerable cases
 per path.
 
 The latest complete retained answer comparison is
-`evals/results/eval-20260731T114721Z.json`. Its `manual_review` object records
+`evals/results/eval-20260803T202217Z.json`. Its `manual_review` object records
 the direct inspection of all 120 golden answers and all 20 adversarial answers
-generated after the OCR and hybrid BM25/vector retrieval change.
+generated after the exact-quote corrective pass. Every answer is byte-for-byte
+identical to the prior directly reviewed pass; retrieval and termination metadata
+were reviewed separately.
 
 | Release gate | Current result | Target |
 | --- | ---: | ---: |
@@ -24,7 +26,7 @@ generated after the OCR and hybrid BM25/vector retrieval change.
 | Structured control outputs | all schemas and fallbacks pass | 100% handled |
 | Ordinary agent retrievals | exactly one | exactly one |
 | Adversarial cases | 20/20 | regression baseline |
-| Code tests | 128 passed, 2 opt-in live tests skipped | all default tests pass |
+| Code tests | 135 passed; quality integration suite 24/24 with live checks enabled | all pass |
 
 The citation count is 52 because eight golden cases correctly abstain without
 making a positive factual claim. All 52 factual answers in each path cite text
@@ -48,6 +50,69 @@ agent execution failure. The directly reviewed answer itself, rather than a
 similarity score or model judge, is the acceptance criterion.
 
 ## Review history
+
+### 4 August forced-miss coverage review
+
+The earlier three-trial synthetic test proved that the corrective branch could
+work, but a stronger ablation exposed two permissive shortcuts: one accepted a
+single overlapping term as complete evidence, and another accepted any passage
+containing the same identifier. With one required source hidden from the initial
+retrievals of eight reviewed multi-document questions, correction activated in
+only three cases and reproduced just two retained answers.
+
+Those shortcuts were removed. Complete deterministic joins remain for facts that
+can prove every required leg, including ports and exposure, versioned source
+visibility, and the local/hosted privacy boundary. Other non-empty retrieval legs
+must supply model-selected verbatim evidence. After correction, a complete
+deterministic join may terminate successfully; otherwise the existing exact-quote
+revalidation runs once and can only answer or abstain. Invalid corrective plans now
+fall back to the full missing sub-question instead of an identifier-only query.
+
+The real-corpus ablation then produced 0/8 complete baseline answers versus 7/8
+byte-for-byte retained answers and 8/8 correct answers under direct review. The
+eighth answer stated the same two facts with an alternate directly supporting
+evaluation-plan citation. Required target citations improved from 0/8 to 8/8.
+Every case stayed bounded to one corrective retrieval per missing leg; some
+questions had two missing legs. A targeted rerun verified the final authentication
+case after making that decomposition atomic and source-specific.
+
+The four normal corpus questions affected by the refactor reproduced their retained
+answers byte-for-byte with normal termination and no corrective pass. The standard
+suite passed 135 tests with two optional skips; the opt-in OCR, reranker, and live
+Ollama suite passed all 24 tests. This ablation measures controlled failures on the
+bundled corpus, not general-corpus accuracy.
+
+### 3 August bounded-correction review
+
+The first live rollout exposed a latency regression rather than an accuracy
+improvement: all 15 agent multi-hop cases failed because model-based coverage
+checks consumed the 30-second request budget. Twelve ended at the wall-clock
+limit and three ended during corrective planning. Those failed intermediate
+runs were retained during diagnosis but are not release evidence.
+
+The shared path was tightened without increasing the timeout. Existing
+deterministic evidence joins now prove exact coverage before model review, empty
+legs are marked missing immediately, and a corrective plan may not introduce
+terms or identifiers absent from the missing sub-question. At that review point,
+an invalid plan received one deterministic exact-ID fallback and still could not
+loop; the 4 August review replaced it with a fuller grounded fallback.
+
+The final real-model run passed all 60 Agentic answers, all 20 adversarial cases,
+the 15/15 multi-hop subset, and 100% expected-source recall. All Agentic and
+adversarial answers were byte-for-byte identical to the previous directly
+reviewed pass. The separate Direct run also reproduced all 60 previous answers
+with 100% expected-source recall. There were no generation errors or non-normal
+terminations, and none of the fixed-corpus cases needed correction because their
+initial evidence was already complete.
+
+A controlled forced-miss A/B exercised the new branch with Ollama
+`llama3.2:3b`. Both paths initially received the AX-101 evidence and missed
+BX-202. Across three trials, the initial-only baseline completed 0/3 answers;
+the bounded path completed 3/3, adding exactly one retrieval and both source
+citations. Mean latency rose from 3.802 seconds to 6.562 seconds. The model added
+unsupported catalyst language to each corrective plan; validation rejected it
+and the exact-ID fallback recovered the correct BX-202 source. This demonstrates
+bounded recovery for that controlled failure, not general-corpus improvement.
 
 ### 31 July OCR and hybrid-retrieval review
 
@@ -124,12 +189,17 @@ live Groq answer run was not performed because no Groq API key was configured.
 
 - Standalone ordinary questions perform one retrieval and cannot enter a search
   loop.
-- Conversational planning, spreadsheet planning, and multi-hop decomposition
-  use validated provider-native JSON schemas with deterministic fallbacks.
+- Conversational planning, spreadsheet planning, multi-hop decomposition,
+  evidence coverage, and corrective queries use validated provider-native JSON
+  schemas.
 - Spreadsheet calculations use validated fixed operations compiled to
   parameterized DuckDB SQL; model-generated SQL is not executed.
-- Multi-hop questions use one non-recursive decomposition pass and two to four
-  independent retrievals, with partial-answer behavior when evidence is absent.
+- Multi-hop questions begin with one non-recursive decomposition and two to four
+  retrievals. Each leg needs a verified exact quote; missing legs receive at most
+  one corrective retrieval and one terminal revalidation before answer or abstention.
+- Deterministically provable complete joins bypass model coverage checks. Corrective
+  plans with ungrounded terms use one reported query derived from the full missing
+  sub-question rather than a second model call.
 - Exact identifiers, feature boundaries, negative premises, deployment facts,
   and unambiguous table rows have deterministic evidence-backed handling.
 - Prompt-injection text in retrieved documents is treated as data, not as an

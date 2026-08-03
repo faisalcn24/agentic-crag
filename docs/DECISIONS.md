@@ -36,10 +36,16 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 - **Decision:** Retrieve exactly once for an ordinary standalone question. For a
   recognized multi-hop question, perform one non-recursive decomposition into
-  two to four focused retrievals, then answer or partially abstain. Retain the
-  30-second response deadline and token accounting.
-- **Why:** The earlier sufficiency/reformulation loop terminated 58 of 60 agent cases through loop safeguards instead of normal answers.
+  two to four focused retrievals, require an exact source quote for each leg,
+  and allow one corrective retrieval for each missing leg. Revalidate once, then
+  answer or terminally abstain. Retain the 30-second deadline and token accounting.
+- **Why:** The earlier open sufficiency/reformulation loop terminated 58 of 60
+  agent cases through loop safeguards instead of normal answers. A single
+  corrective pass addresses incomplete retrieval without recreating that loop.
 - **Rejected:** Model-controlled repeated retrieval and an open-ended autonomous loop.
+- **Implementation guard:** Deterministic exact-evidence joins run before model
+  coverage checks. Invalid corrective terms are rejected and receive one bounded
+  query derived from the full missing sub-question, never another planning call.
 - **Limitation:** Python cannot safely kill a running synchronous provider call. The request returns at the deadline, but a non-cooperative call already running in the worker relies on its configured HTTP timeout.
 - **Implementation update:** D-013 removes the unnecessary graph framework while
   retaining these bounds.
@@ -69,8 +75,9 @@ Decisions are recorded before measurements so later results are not tuned to a p
 ## D-010: Constrain every model-generated control object
 
 - **Decision:** Request provider-native JSON schemas for conversational query
-  planning, spreadsheet plans, and multi-hop decomposition; validate every
-  response and use a deterministic fallback on failure.
+  planning, spreadsheet plans, multi-hop decomposition, evidence coverage, and
+  corrective queries. Validate every response; control failures either use an
+  existing deterministic fallback or terminate safely.
 - **Why:** Small local models were unreliable when JSON structure was requested
   only in prose.
 - **Rejected:** Trusting unrestricted JSON, adding repair loops, or introducing
@@ -88,8 +95,9 @@ Decisions are recorded before measurements so later results are not tuned to a p
 ## D-012: Use bounded decomposition for multi-document questions
 
 - **Decision:** Decompose recognized complex questions once into two to four
-  independent evidence queries, track missing evidence, and synthesize only from
-  the resulting excerpts.
+  independent evidence queries. Verify each claimed supporting quote against the
+  named source, correct missing legs once, and synthesize only after terminal
+  revalidation succeeds.
 - **Why:** One broad query can retrieve the right documents without exposing all
   required facts to the answer step.
 - **Rejected:** Recursive agents, open-ended planning, and an indexing migration

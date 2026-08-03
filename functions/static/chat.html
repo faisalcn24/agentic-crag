@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Chat with your indexed documents using INSIGHT AI.">
-  <title>INSIGHT AI</title>
+  <meta name="description" content="Chat with your indexed documents using Agentic CRAG.">
+  <title>Agentic CRAG</title>
   <style>
     :root {
       color-scheme: dark;
@@ -207,6 +207,9 @@
     .source-heading { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: 12px; font-weight: 750; }
     .source-score { color: var(--muted); font-weight: 500; }
     .source-text { margin: 8px 0 0; color: #b8c2d2; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .source-toggle { margin-top: 7px; padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
+    .source-toggle:hover { text-decoration: underline; }
+    .source-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
 
     .thinking { display: inline-flex; gap: 5px; padding-top: 8px; }
     .thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite ease-in-out; }
@@ -262,10 +265,10 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">I</div>
+        <div class="brand-mark">A</div>
         <div>
-          <div class="brand-name">INSIGHT AI</div>
-          <div class="brand-subtitle">Document intelligence</div>
+          <div class="brand-name">AGENTIC CRAG</div>
+          <div class="brand-subtitle">Corrective document RAG</div>
         </div>
       </div>
 
@@ -417,7 +420,7 @@
       const body = document.createElement("div");
       const label = document.createElement("p");
       label.className = "message-role";
-      label.textContent = role === "user" ? "You" : role === "error-message" ? "Request error" : "INSIGHT AI";
+      label.textContent = role === "user" ? "You" : role === "error-message" ? "Request error" : "AGENTIC CRAG";
       const content = document.createElement("p");
       content.className = "message-text";
       content.textContent = text;
@@ -434,18 +437,30 @@
         body.append(meta);
       }
 
-      if (sources.length) body.append(createSources(sources));
+      const abstained = metadata.termination_reason === "abstained"
+        || text.includes("The answer is not present in the provided documents.");
+      if (sources.length) body.append(createSources(sources, !abstained));
       item.append(avatar, body);
       elements.messages.append(item);
       elements.messages.scrollTop = elements.messages.scrollHeight;
       return item;
     }
 
-    function createSources(sources) {
+    const SOURCE_PREVIEW_LENGTH = 300;
+
+    function compactSourceText(text) {
+      const normalized = text.trim();
+      if (normalized.length <= SOURCE_PREVIEW_LENGTH) return normalized;
+      const preview = normalized.slice(0, SOURCE_PREVIEW_LENGTH).replace(/\s+\S*$/, "").trimEnd();
+      return `${preview}…`;
+    }
+
+    function createSources(sources, supporting = true) {
       const details = document.createElement("details");
       details.className = "sources";
       const summary = document.createElement("summary");
-      summary.textContent = `${sources.length} supporting source${sources.length === 1 ? "" : "s"}`;
+      const label = supporting ? "supporting source" : "closest retrieved passage";
+      summary.textContent = `${sources.length} ${label}${sources.length === 1 ? "" : "s"}`;
       details.append(summary);
 
       sources.forEach((source, index) => {
@@ -461,8 +476,24 @@
         heading.append(filename, score);
         const excerpt = document.createElement("p");
         excerpt.className = "source-text";
-        excerpt.textContent = source.text || "No excerpt returned.";
+        const fullText = (source.text || "No excerpt returned.").trim();
+        const previewText = compactSourceText(fullText);
+        excerpt.textContent = previewText;
         item.append(heading, excerpt);
+        if (previewText !== fullText) {
+          const toggle = document.createElement("button");
+          toggle.className = "source-toggle";
+          toggle.type = "button";
+          toggle.textContent = "Show more";
+          toggle.setAttribute("aria-expanded", "false");
+          toggle.addEventListener("click", () => {
+            const expanded = toggle.getAttribute("aria-expanded") === "true";
+            excerpt.textContent = expanded ? previewText : fullText;
+            toggle.textContent = expanded ? "Show more" : "Show less";
+            toggle.setAttribute("aria-expanded", String(!expanded));
+          });
+          item.append(toggle);
+        }
         details.append(item);
       });
       return details;

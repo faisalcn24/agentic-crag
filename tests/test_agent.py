@@ -1,15 +1,88 @@
 from __future__ import annotations
 
+import json
 from time import perf_counter, sleep
 
 from functions.agent import (
     AgentConfig,
     AgentRuntime,
+    _focused_evidence,
+    _validate_corrective_queries,
     budget_fallback,
     contains_prompt_injection,
     is_clearly_out_of_scope,
     run_agent,
 )
+from functions.multihop import answer_bounded_multihop_fact
+
+
+def _coverage_json(*records):
+    return json.dumps(
+        {
+            "coverage": [
+                {
+                    "subquery": subquery,
+                    "covered": quote is not None,
+                    "filename": filename if quote is not None else None,
+                    "quote": quote,
+                }
+                for subquery, filename, quote in records
+            ]
+        }
+    )
+
+
+def test_coverage_evidence_excludes_embedded_eval_answers():
+    text = (
+        "Question E: Is authentication included in the current release? "
+        "Expected source: requirements.docx. Expected answer: no authentication. "
+        "Authentication is not included in the current release."
+    )
+
+    evidence = _focused_evidence(text, "Does the current release include authentication?")
+
+    assert "Question E" not in evidence
+    assert "Expected source" not in evidence
+    assert "Expected answer" not in evidence
+    assert "Authentication is not included" in evidence
+
+
+def test_single_corrective_query_tolerates_a_paraphrased_label():
+    missing = ["What does BX-202 state that is relevant to this question?"]
+
+    result = _validate_corrective_queries(
+        {
+            "queries": [
+                {
+                    "missing_subquery": "What does BX-202 require?",
+                    "query": "Find the exact documented requirement BX-202",
+                }
+            ]
+        },
+        missing,
+    )
+
+    assert result == {
+        missing[0]: "Find the exact documented requirement BX-202"
+    }
+
+
+def test_corrective_query_rejects_ungrounded_terms():
+    missing = ["What does BX-202 state that is relevant to this question?"]
+
+    result = _validate_corrective_queries(
+        {
+            "queries": [
+                {
+                    "missing_subquery": missing[0],
+                    "query": "What does BX-202 say about chemical catalysts?",
+                }
+            ]
+        },
+        missing,
+    )
+
+    assert result is None
 
 
 def test_ordinary_question_answers_after_one_retrieval(tmp_path, monkeypatch):
@@ -369,6 +442,22 @@ def test_multi_hop_question_retrieves_each_subquestion_once(tmp_path, monkeypatc
                 '"What storage path is recommended for EC2?"]}',
                 20,
             )
+        if node == "evidence_coverage":
+            return (
+                _coverage_json(
+                    (
+                        "What storage path is recommended for Windows?",
+                        "releases.docx",
+                        "Windows development uses .insight_data.",
+                    ),
+                    (
+                        "What storage path is recommended for EC2?",
+                        "runbook.docx",
+                        "EC2 uses /opt/insight-ai/data.",
+                    ),
+                ),
+                20,
+            )
         assert node == "synthesis"
         assert "Do not reproduce the subquestions" in prompt
         assert "Do not infer equivalence" in prompt
@@ -397,6 +486,98 @@ def test_multi_hop_question_retrieves_each_subquestion_once(tmp_path, monkeypatc
     assert "/opt/insight-ai/data" in result["answer"]
 
 
+def test_bounded_answer_rejects_weak_partial_evidence():
+    answer = answer_bounded_multihop_fact(
+        "What evidence across the corpus supports adding swap on a small EC2 instance?",
+        [
+            {
+                "filename": "runbook.docx",
+                "type": "docx",
+                "score": 0.9,
+                "text": "The application uses a small EC2 instance.",
+            }
+        ],
+    )
+
+    assert answer is None
+
+
+def test_identifier_only_distractor_triggers_corrective_retrieval(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    risk_question = "What issue and mitigation does risk R-002 record?"
+    incident_question = (
+        "Which incident has the matching symptom or root cause for R-002, and what fixed it?"
+    )
+    corrective_query = "Find exact R-002 incident symptom root cause fixed evidence"
+    risk_source = {
+        "filename": "risks.xlsx-Risk Register",
+        "type": "xlsx",
+        "score": 0.9,
+        "text": (
+            "Risk_ID: R-002 | Risk: Nginx route returns 404 for /api/health | "
+            "Mitigation: Link the site and reload Nginx"
+        ),
+    }
+    incident_source = {
+        "filename": "risks.xlsx-Incident Log",
+        "type": "xlsx",
+        "score": 0.95,
+        "text": (
+            "Incident_ID: I-004 | Symptom: curl /api/health returned Nginx 404 | "
+            "Root_Cause: Nginx site inactive | Fix: Link the site and reload Nginx"
+        ),
+    }
+    called_nodes = []
+
+    def retrieve(query, _top_k):
+        return [incident_source] if query == corrective_query else [risk_source]
+
+    def complete(_prompt, node, _timeout):
+        called_nodes.append(node)
+        if node == "evidence_coverage":
+            records = (
+                ((incident_question, "risks.xlsx-Incident Log", incident_source["text"]),)
+                if called_nodes.count("evidence_coverage") == 2
+                else (
+                    (risk_question, "risks.xlsx-Risk Register", risk_source["text"]),
+                    (incident_question, None, None),
+                )
+            )
+            return _coverage_json(*records), 10
+        if node == "corrective_queries":
+            return (
+                json.dumps(
+                    {
+                        "queries": [
+                            {
+                                "missing_subquery": incident_question,
+                                "query": corrective_query,
+                            }
+                        ]
+                    }
+                ),
+                10,
+            )
+        raise AssertionError(f"unexpected model node: {node}")
+
+    result = run_agent(
+        None,
+        "Connect risk R-002 with the matching recorded incident and fix.",
+        runtime=AgentRuntime(retrieve=retrieve, complete=complete),
+    )
+
+    assert result["agent"]["corrective_pass_used"] is True
+    assert result["agent"]["iterations"] == 3
+    assert called_nodes == [
+        "evidence_coverage",
+        "corrective_queries",
+    ]
+    assert "R-002" in result["answer"]
+    assert "I-004" in result["answer"]
+
+
 def test_multi_hop_evidence_path_preserves_every_supported_leg(
     tmp_path, monkeypatch
 ):
@@ -411,6 +592,20 @@ def test_multi_hop_evidence_path_preserves_every_supported_leg(
                 "to the public internet."
             ),
             ("127.0.0.1:8000", "127.0.0.1:8501", "port 80"),
+            (
+                (
+                    "What port and public exposure are specified for Nginx?",
+                    "Nginx listens publicly on port 80.",
+                ),
+                (
+                    "What bind address and port are specified for FastAPI?",
+                    "FastAPI listens on 127.0.0.1:8000 and Streamlit listens on 127.0.0.1:8501.",
+                ),
+                (
+                    "What bind address and port are specified for Streamlit?",
+                    "FastAPI listens on 127.0.0.1:8000 and Streamlit listens on 127.0.0.1:8501.",
+                ),
+            ),
         ),
         (
             "How did source visibility change from version 2.2 to version 2.4?",
@@ -422,6 +617,24 @@ def test_multi_hop_evidence_path_preserves_every_supported_leg(
                 "Streamlit to display source snippets in a Sources expander."
             ),
             ("only answer text", "not yet exposed", "sources list", "display source"),
+            (
+                (
+                    "What did version 2.2 chat responses return?",
+                    "Version 2.2 used simple chat responses that returned only answer text.",
+                ),
+                (
+                    "Were source snippets exposed to users in version 2.2?",
+                    "Source snippets were not yet exposed to the UI.",
+                ),
+                (
+                    "Which fields are in version 2.4 chat responses?",
+                    "The chat response now includes an answer field and a sources list.",
+                ),
+                (
+                    "How did version 2.4 display source snippets to users?",
+                    "Version 2.4 updated Streamlit to display source snippets in a Sources expander.",
+                ),
+            ),
         ),
         (
             "What privacy boundary is created by local embeddings plus hosted answer generation?",
@@ -430,13 +643,39 @@ def test_multi_hop_evidence_path_preserves_every_supported_leg(
                 "model. Hybrid mode sends retrieved excerpts to Groq."
             ),
             ("local embeddings", "full documents", "retrieved excerpts", "Groq"),
+            (
+                (
+                    "What document data stays local when embeddings are created?",
+                    "Local embeddings avoid sending full documents to the answer generation model.",
+                ),
+                (
+                    "What retrieved document data can be sent to hosted answer generation?",
+                    "Hybrid mode sends retrieved excerpts to Groq.",
+                ),
+            ),
         ),
     ]
 
-    def complete(*_args):
-        raise AssertionError("complete retrieved evidence should not need synthesis")
+    for question, evidence, required, quotes in cases:
+        def complete(_prompt, node, _timeout, quote_records=quotes):
+            if node == "evidence_coverage":
+                return (
+                    _coverage_json(
+                        *(
+                            (subquery, "evidence.docx", quote)
+                            for subquery, quote in quote_records
+                        )
+                    ),
+                    20,
+                )
+            assert node == "synthesis"
+            return (
+                " ".join(
+                    f"{quote} [evidence.docx]" for _, quote in quote_records
+                ),
+                20,
+            )
 
-    for question, evidence, required in cases:
         result = run_agent(
             None,
             question,
@@ -464,6 +703,22 @@ def test_invalid_decomposition_uses_one_bounded_fallback_pass(tmp_path, monkeypa
     def complete(_prompt, node, _timeout):
         if node == "decomposition":
             return "invalid", 10
+        if node == "evidence_coverage":
+            return (
+                _coverage_json(
+                    (
+                        "What does FR-005 state that is relevant to this question?",
+                        "doc.docx",
+                        "FR-005 and R-004 both require visible source snippets.",
+                    ),
+                    (
+                        "What does R-004 state that is relevant to this question?",
+                        "doc.docx",
+                        "FR-005 and R-004 both require visible source snippets.",
+                    ),
+                ),
+                10,
+            )
         return "FR-005 and R-004 both require visible sources [doc.docx].", 10
 
     result = run_agent(
@@ -476,7 +731,7 @@ def test_invalid_decomposition_uses_one_bounded_fallback_pass(tmp_path, monkeypa
                     "filename": "doc.docx",
                     "type": "docx",
                     "score": 0.9,
-                    "text": "The control returns visible source snippets.",
+                    "text": "FR-005 and R-004 both require visible source snippets.",
                 }
             ],
             complete=complete,
@@ -487,13 +742,32 @@ def test_invalid_decomposition_uses_one_bounded_fallback_pass(tmp_path, monkeypa
     assert result["agent"]["iterations"] == len(retrieved)
 
 
-def test_multi_hop_missing_evidence_returns_partial_warning(tmp_path, monkeypatch):
+def test_failed_revalidation_abstains_without_second_loop(tmp_path, monkeypatch):
     monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    called_nodes = []
+    coverage_calls = 0
 
     def complete(_prompt, node, _timeout):
+        nonlocal coverage_calls
+        called_nodes.append(node)
         if node == "decomposition":
             return '{"subquestions":["What is fact A?","What is fact B?"]}', 10
-        return "Fact A is supported [a.docx].", 10
+        if node == "corrective_queries":
+            return (
+                '{"queries":[{"missing_subquery":"What is fact B?",'
+                '"query":"Find the exact documented value for fact B"}]}',
+                10,
+            )
+        coverage_calls += 1
+        if coverage_calls == 1:
+            return (
+                _coverage_json(
+                    ("What is fact A?", "a.docx", "Fact A."),
+                    ("What is fact B?", None, None),
+                ),
+                10,
+            )
+        return _coverage_json(("What is fact B?", None, None)), 10
 
     result = run_agent(
         None,
@@ -508,8 +782,110 @@ def test_multi_hop_missing_evidence_returns_partial_warning(tmp_path, monkeypatc
         ),
     )
 
-    assert result["answer"].startswith("Partial answer:")
+    assert result["answer"].startswith(
+        "The answer is not present in the provided documents."
+    )
     assert "What is fact B?" in result["answer"]
+    assert "What is fact A?" not in result["answer"]
+    assert result["agent"]["termination_reason"] == "revalidation_failed"
+    assert result["agent"]["corrective_pass_used"] is True
+    assert result["agent"]["iterations"] == 3
+    assert called_nodes == [
+        "decomposition",
+        "evidence_coverage",
+        "corrective_queries",
+    ]
+
+
+def test_fabricated_quote_triggers_one_successful_corrective_pass(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    called_nodes = []
+    coverage_calls = 0
+    corrective_query = "Find the exact documented statement for fact B"
+
+    def complete(_prompt, node, _timeout):
+        nonlocal coverage_calls
+        called_nodes.append(node)
+        if node == "decomposition":
+            return '{"subquestions":["What is fact A?","What is fact B?"]}', 10
+        if node == "corrective_queries":
+            return (
+                '{"queries":[{"missing_subquery":"What is fact B?",'
+                f'"query":"{corrective_query}"}}]}}',
+                10,
+            )
+        if node == "synthesis":
+            return (
+                "Fact A has value red [a.docx], while Fact B has value blue [b.docx].",
+                10,
+            )
+        coverage_calls += 1
+        if coverage_calls == 1:
+            return (
+                _coverage_json(
+                    ("What is fact A?", "a.docx", "Fact A has value red."),
+                    ("What is fact B?", "near.docx", "Fact B has value blue."),
+                ),
+                10,
+            )
+        return (
+            _coverage_json(
+                ("What is fact B?", "b.docx", "Fact B has value blue.")
+            ),
+            10,
+        )
+
+    def retrieve(query, _top_k):
+        if query == corrective_query:
+            return [
+                {
+                    "filename": "b.docx",
+                    "type": "docx",
+                    "score": 0.95,
+                    "text": "Fact B has value blue.",
+                }
+            ]
+        if query.endswith("A?"):
+            return [
+                {
+                    "filename": "a.docx",
+                    "type": "docx",
+                    "score": 0.9,
+                    "text": "Fact A has value red.",
+                }
+            ]
+        return [
+            {
+                "filename": "near.docx",
+                "type": "docx",
+                "score": 0.8,
+                "text": "This excerpt discusses only fact C.",
+            }
+        ]
+
+    result = run_agent(
+        None,
+        "Compare fact A and fact B across the documents.",
+        runtime=AgentRuntime(retrieve=retrieve, complete=complete),
+    )
+
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["agent"]["corrective_pass_used"] is True
+    assert result["agent"]["iterations"] == 3
+    assert result["agent"]["query_history"][-1] == corrective_query
+    assert called_nodes == [
+        "decomposition",
+        "evidence_coverage",
+        "corrective_queries",
+        "evidence_coverage",
+        "synthesis",
+    ]
+    assert "red" in result["answer"]
+    assert "blue" in result["answer"]
+    assert "[a.docx]" in result["answer"]
+    assert "[b.docx]" in result["answer"]
 
 
 def test_multi_hop_answer_rebuilds_citations_from_supporting_evidence(
@@ -520,6 +896,14 @@ def test_multi_hop_answer_rebuilds_citations_from_supporting_evidence(
     def complete(_prompt, node, _timeout):
         if node == "decomposition":
             return '{"subquestions":["What is fact A?","What is fact B?"]}', 10
+        if node == "evidence_coverage":
+            return (
+                _coverage_json(
+                    ("What is fact A?", "a.docx", "Fact A has value red."),
+                    ("What is fact B?", "b.docx", "Fact B has value blue."),
+                ),
+                10,
+            )
         return "Fact A has value red, while Fact B has value blue.", 10
 
     result = run_agent(

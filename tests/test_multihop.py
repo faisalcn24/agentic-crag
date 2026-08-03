@@ -108,6 +108,15 @@ def test_deterministic_decomposition_targets_required_facts():
         assert all(phrase.casefold() in joined.casefold() for phrase in required_phrases)
 
 
+def test_public_deployment_decomposition_asks_for_the_two_actual_risks():
+    assert deterministic_decomposition(
+        "What two document-based reasons make a long-lived public deployment unsafe as currently specified?"
+    ) == [
+        "What does the product requirements document state about authentication in the current release?",
+        "What document data can hybrid hosted answer generation send to an external provider?",
+    ]
+
+
 def test_decomposition_rejects_non_question_control_fragments():
     assert validate_decomposition(
         {

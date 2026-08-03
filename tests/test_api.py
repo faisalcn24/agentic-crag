@@ -27,8 +27,12 @@ def test_root_serves_graphical_chat_page():
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "INSIGHT AI" in response.text
+    assert "AGENTIC CRAG" in response.text
     assert 'fetch(`/${elements.mode.value}`' in response.text
+    assert "SOURCE_PREVIEW_LENGTH = 300" in response.text
+    assert 'toggle.textContent = "Show more"' in response.text
+    assert 'toggle.textContent = expanded ? "Show more" : "Show less"' in response.text
+    assert '"closest retrieved passage"' in response.text
 
 
 def test_upload_allowlist_accepts_documents_and_images():

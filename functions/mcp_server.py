@@ -10,7 +10,7 @@ from .rag import load_index, load_registry, retrieve_sources, sanitize_index_id
 
 
 mcp = FastMCP(
-    "Insight AI Document Analysis",
+    "Agentic CRAG Document Analysis",
     instructions="Search and answer questions over locally indexed document collections.",
     json_response=True,
 )

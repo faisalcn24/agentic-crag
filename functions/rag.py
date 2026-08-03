@@ -89,6 +89,62 @@ STRUCTURED_OUTPUT_SCHEMAS = {
     },
     "spreadsheet_plan": SPREADSHEET_PLAN_SCHEMA,
     "decomposition": DECOMPOSITION_SCHEMA,
+    "evidence_coverage": {
+        "type": "object",
+        "properties": {
+            "coverage": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "subquery": {
+                            "type": "string",
+                            "minLength": 5,
+                            "maxLength": 300,
+                        },
+                        "covered": {"type": "boolean"},
+                        "filename": {"type": ["string", "null"]},
+                        "quote": {"type": ["string", "null"]},
+                    },
+                    "required": ["subquery", "covered", "filename", "quote"],
+                    "additionalProperties": False,
+                },
+                "minItems": 1,
+                "maxItems": 4,
+            }
+        },
+        "required": ["coverage"],
+        "additionalProperties": False,
+    },
+    "corrective_queries": {
+        "type": "object",
+        "properties": {
+            "queries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "missing_subquery": {
+                            "type": "string",
+                            "minLength": 5,
+                            "maxLength": 300,
+                        },
+                        "query": {
+                            "type": "string",
+                            "minLength": 5,
+                            "maxLength": 300,
+                        },
+                    },
+                    "required": ["missing_subquery", "query"],
+                    "additionalProperties": False,
+                },
+                "minItems": 1,
+                "maxItems": 4,
+            }
+        },
+        "required": ["queries"],
+        "additionalProperties": False,
+    },
 }
 
 SYSTEM_PROMPT = (
@@ -441,7 +497,7 @@ def call_model(
             256
             if node == "planner"
             else 512
-            if node in {"spreadsheet_plan", "decomposition"}
+            if node in {"spreadsheet_plan", "decomposition", "corrective_queries"}
             else 1024
         ),
     }

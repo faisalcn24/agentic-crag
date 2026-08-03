@@ -1,72 +1,76 @@
-# Insight AI
+# Agentic CRAG
 
 [![CI](https://github.com/faisalcn24/insight-ai-2/actions/workflows/ci.yml/badge.svg)](https://github.com/faisalcn24/insight-ai-2/actions/workflows/ci.yml)
 
-**A local-first document intelligence system that answers questions with cited evidence.**
+**A local-first RAG system that answers questions over documents with cited evidence.**
 
-Insight AI turns PDF, DOCX, XLSX, and image files into persistent searchable
-collections. It combines OCR, hybrid search, spreadsheet analysis, and bounded
-multi-document reasoning in a browser application, REST API, and MCP server.
+Agentic CRAG turns PDF, DOCX, XLSX, and image files into persistent searchable
+collections. It combines OCR, hybrid retrieval, spreadsheet analysis, and bounded
+multi-document reasoning behind a browser UI, REST API, and MCP server.
 
-## Why it stands out
+## What it demonstrates
 
-- **Grounded answers:** every factual response includes inspectable source excerpts;
-  unsupported questions are explicitly declined.
-- **Strong retrieval:** BM25 keyword search and vector similarity are fused, then
-  cross-encoder reranked. This improves both semantic questions and exact identifiers.
-- **Practical document support:** embedded PDF text uses fast extraction, while
-  scanned PDFs and images use local OCR.
-- **Controlled agent behavior:** ordinary questions retrieve once; multi-hop questions
-  use one bounded, non-recursive pass of two to four focused retrievals.
-- **Reliable spreadsheet analysis:** validated operations run through DuckDB instead
-  of model-generated SQL.
+- **Grounded answers:** factual claims include inspectable citations; unsupported
+  questions are declined.
+- **Hybrid retrieval:** BM25 and vector results are fused, then cross-encoder
+  reranked for semantic questions and exact identifiers.
+- **Bounded reasoning:** multi-hop questions are decomposed once, checked for
+  verbatim evidence, and receive at most one corrective retrieval per missing leg.
+- **Document intelligence:** local OCR handles images and scanned PDFs; validated
+  DuckDB operations handle spreadsheet questions.
+- **Local-first execution:** parsing, OCR, embeddings, retrieval, and storage stay
+  local. Ollama also keeps generation local; optional Groq sends only the question
+  and retrieved excerpts.
 
 **Stack:** Python 3.13, FastAPI, LlamaIndex, BM25, BGE embeddings/reranking,
 RapidOCR, DuckDB, Ollama, optional Groq, MCP, pytest, and Ruff.
 
 ## Verified results
 
-The complete post-OCR and hybrid-search review produced:
+The retained full-corpus review records:
 
 | Evaluation | Result |
 | --- | ---: |
 | Direct RAG | 60/60 |
-| Agentic RAG | 60/60 |
+| Bounded agent RAG | 60/60 |
 | Adversarial cases | 20/20 |
 | Expected-source recall | 100% |
-| Spreadsheet questions | 15/15 |
-| Multi-hop questions | 15/15 |
+| Spreadsheet / multi-hop subsets | 15/15 each |
 | Answer-not-present behavior | 10/10 |
-| Automated tests | 128 passed, 2 optional live tests skipped |
+| Automated tests | 135 passed |
+| Quality integration suite | 24/24 with live checks enabled |
 
-Answers and citations were reviewed directly; no model judge was used. See the
-[evaluation methodology](docs/EVALUATION.md) and
-[reviewed raw output](evals/results/eval-20260731T114721Z.json).
+Answers and citations were reviewed directly without a model judge. After the latest
+coverage-gate change, all 15 retained multi-hop answers preserved deterministic
+parity, and the four affected normal corpus cases reproduced their answers
+byte-for-byte in live runs.
 
-These results measure the bundled, self-authored corpus. They do not claim the same
-performance on arbitrary production documents. OCR tests cover generated printed-text
-images and scanned PDFs, not every scan quality, layout, or handwriting style.
+A controlled live forced-miss test hid required evidence from eight reviewed
+multi-document questions. The correction-disabled path completed 0/8; bounded
+correction completed 7/8 byte-for-byte and 8/8 under direct review, restoring all
+required citations without creating a retrieval loop.
+
+See the [evaluation methodology](docs/EVALUATION.md) and
+[reviewed output](evals/results/eval-20260803T202217Z.json). These measurements use
+the bundled, self-authored corpus; they do not establish general production accuracy.
+OCR tests cover generated printed-text scans, not arbitrary layouts or handwriting.
 
 ## How it works
 
 ```text
 Documents -> parse/OCR -> persistent collection
                               |
-Question -> BM25 + vector search -> rerank -> exact/table/multi-hop handling
-                                                |
-                                   grounded answer + citations
+Question -> BM25 + vector search -> rerank -> exact/table handling -> cited answer
+                                      |
+                     multi-hop -> quote check -> one optional correction
+                                      |
+                              answer or abstain
 ```
-
-Parsing, OCR, embeddings, retrieval, and storage run locally. Ollama keeps answer
-generation local as well. If Groq is selected, questions and retrieved excerpts are
-sent to Groq for generation and planning.
 
 ## Run locally
 
 Requirements: Python 3.13 and [Ollama](https://ollama.com/) with
 `llama3.2:3b`.
-
-### Windows
 
 ```powershell
 py -3.13 -m venv venv
@@ -77,41 +81,31 @@ ollama pull llama3.2:3b
 .\run.bat
 ```
 
-### Linux/macOS
+Open `http://localhost:8000`, create a collection, and upload files from
+`documents/`. On Linux or macOS, use `bash scripts/run_dev.sh`.
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-python3 -m pip install -r requirements.txt
-cp .env.example .env
-ollama pull llama3.2:3b
-bash scripts/run_dev.sh
-```
-
-Open `http://localhost:8000`, create a collection, and upload the sample files from
-`documents/`. Useful demo questions:
+Useful demo questions:
 
 - `What does FR-006 require?`
 - `How much faster was tiny-smoke retrieval than large-policy-pack retrieval?`
 - `Contrast the recommended local Windows and EC2 storage locations.`
-- `What was the company payroll for 2026?` (demonstrates abstention)
+- `What was the company payroll for 2026?` - demonstrates abstention
 
-Supporting evidence is expandable beneath every answer. Swagger is available at
-`http://localhost:8000/docs`.
+Supporting evidence is expandable below each answer. API documentation is available
+at `http://localhost:8000/docs`.
 
-## Interfaces and scope
+## Interfaces and boundaries
 
 - Browser chat and collection management
-- REST endpoints for collections, direct RAG, agentic RAG, retrieval, and metrics
+- REST endpoints for direct RAG, bounded agent RAG, retrieval, metrics, and collections
 - MCP tools for corpus search, grounded answers, and collection discovery
 - PDF, DOCX, XLSX, PNG, JPEG, TIFF, BMP, and WebP input
-- Local JSONL latency and retrieval-iteration telemetry
 
-This is a trusted local demo, not a public SaaS product. It intentionally has no user
-authentication, rate limiting, retention policy, or multi-tenant isolation. Add those
-controls before exposing private documents or an untrusted public endpoint.
+This is a trusted local demo, not a public multi-tenant service. Add authentication,
+HTTPS, rate limiting, and a retention policy before exposing private documents or an
+untrusted public endpoint.
 
-## Verify the project
+## Verify
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -120,6 +114,6 @@ ruff check functions tests evals scripts
 python evals/run_evals.py --mode compare
 ```
 
-For implementation details, see [architecture decisions](docs/DECISIONS.md),
-[evaluation details](docs/EVALUATION.md), and the optional
+More detail: [architecture decisions](docs/DECISIONS.md),
+[evaluation record](docs/EVALUATION.md), and
 [AWS deployment guide](docs/DEPLOYMENT.md).

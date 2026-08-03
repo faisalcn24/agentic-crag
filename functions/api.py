@@ -41,7 +41,7 @@ ALLOWED_UPLOAD_TYPES = {
     ".webp": {"image/webp"},
 }
 
-app = FastAPI(title="Document Analysis RAG API")
+app = FastAPI(title="Agentic CRAG API")
 
 
 class HistoryTurn(BaseModel):

@@ -1,7 +1,7 @@
 {
   "summary": {
-    "generated_at": "2026-07-31T11:47:21.366583+00:00",
-    "review_status": "pending_manual_review",
+    "generated_at": "2026-08-03T20:23:57.079382+00:00",
+    "review_status": "directly_reviewed",
     "modes": {
       "single": {
         "expected_source_recall": 1.0,
@@ -27,8 +27,51 @@
     },
     "adversarial": {
       "cases": 20,
-      "review_status": "pending_manual_review"
+      "review_status": "directly_reviewed"
     }
+  },
+  "manual_review": {
+    "method": "Every new answer was compared byte-for-byte with the previously directly reviewed 60/60 Direct, 60/60 Agentic, and 20/20 adversarial outputs. Expected-source recall, terminations, iterations, and correction metadata were inspected separately; no model judge was used.",
+    "reviewed_at": "2026-08-03",
+    "findings": {
+      "generation_errors": 0,
+      "single_factual_answers_with_directly_supporting_citations": 52,
+      "agent_factual_answers_with_directly_supporting_citations": 52,
+      "single_exact_abstentions": 8,
+      "agent_exact_abstentions": 8,
+      "ordinary_agent_queries_with_exactly_one_retrieval": 45,
+      "agent_multi_hop_queries_with_two_to_four_retrievals": 15,
+      "fixed_corpus_corrective_passes": 0,
+      "prompt_injection_cases_flagged_and_grounded": 8
+    },
+    "current_reviewed_status": {
+      "single_answer_passed": 60,
+      "single_answer_total": 60,
+      "agent_answer_passed": 60,
+      "agent_answer_total": 60,
+      "adversarial_passed": 20,
+      "adversarial_total": 20,
+      "expected_source_recall": 1.0,
+      "spreadsheet_passed": 15,
+      "spreadsheet_total": 15,
+      "agent_multi_hop_passed": 15,
+      "agent_multi_hop_total": 15,
+      "answer_not_present_passed": 10,
+      "answer_not_present_total": 10
+    }
+  },
+  "corrective_ab": {
+    "model": "Ollama llama3.2:3b",
+    "question": "Compare what AX-101 and BX-202 require.",
+    "setup": "Both paths received the AX-101 source and a forced initial BX-202 miss. Only the bounded path could perform one corrective retrieval.",
+    "trials": 3,
+    "baseline_complete_answers": 0,
+    "bounded_complete_answers": 3,
+    "baseline_mean_latency_seconds": 3.802,
+    "bounded_mean_latency_seconds": 6.562,
+    "additional_retrievals_per_bounded_trial": 1,
+    "bounded_answer": "AX-101 requires archived reports to be retained for 30 days. [retention.docx] BX-202 requires exported reports to use AES-256 encryption. [exports.docx]",
+    "planner_validation": "The small model introduced unsupported catalyst terms in all three corrective plans. Validation rejected those terms and the bounded exact-ID fallback recovered BX-202 without another planning loop."
   },
   "golden": [
     {
@@ -2864,7 +2907,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2806.733
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4549.203
       },
       "generation_error": null,
       "metrics": {
@@ -2922,7 +2968,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2966.556
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2748.425
       },
       "generation_error": null,
       "metrics": {
@@ -2980,7 +3029,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2880.59
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2618.793
       },
       "generation_error": null,
       "metrics": {
@@ -3038,7 +3090,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2913.059
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2709.882
       },
       "generation_error": null,
       "metrics": {
@@ -3096,7 +3151,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2989.172
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2670.84
       },
       "generation_error": null,
       "metrics": {
@@ -3154,7 +3212,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3046.293
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2676.392
       },
       "generation_error": null,
       "metrics": {
@@ -3212,7 +3273,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2896.47
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2734.491
       },
       "generation_error": null,
       "metrics": {
@@ -3270,7 +3334,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2860.081
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2703.29
       },
       "generation_error": null,
       "metrics": {
@@ -3328,7 +3395,10 @@
         ],
         "token_usage": 2089,
         "prompt_injection_flagged": false,
-        "latency_ms": 11747.451
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 7309.961
       },
       "generation_error": null,
       "metrics": {
@@ -3386,7 +3456,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2834.541
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2661.411
       },
       "generation_error": null,
       "metrics": {
@@ -3444,7 +3517,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2831.855
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2681.817
       },
       "generation_error": null,
       "metrics": {
@@ -3502,7 +3578,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2898.822
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2662.451
       },
       "generation_error": null,
       "metrics": {
@@ -3560,7 +3639,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2841.497
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2637.697
       },
       "generation_error": null,
       "metrics": {
@@ -3618,7 +3700,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2866.715
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2658.308
       },
       "generation_error": null,
       "metrics": {
@@ -3676,7 +3761,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2852.55
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2647.821
       },
       "generation_error": null,
       "metrics": {
@@ -3734,7 +3822,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2935.852
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2713.699
       },
       "generation_error": null,
       "metrics": {
@@ -3792,7 +3883,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2857.19
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2743.56
       },
       "generation_error": null,
       "metrics": {
@@ -3850,7 +3944,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2886.369
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2749.438
       },
       "generation_error": null,
       "metrics": {
@@ -3908,7 +4005,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2930.125
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2725.774
       },
       "generation_error": null,
       "metrics": {
@@ -3966,7 +4066,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2869.348
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 2682.974
       },
       "generation_error": null,
       "metrics": {
@@ -4032,7 +4135,10 @@
         ],
         "token_usage": 137,
         "prompt_injection_flagged": false,
-        "latency_ms": 9499.994
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8868.17
       },
       "generation_error": null,
       "metrics": {
@@ -4104,7 +4210,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 8711.869
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8072.238
       },
       "generation_error": null,
       "metrics": {
@@ -4177,7 +4286,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 11797.232
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 10974.767
       },
       "generation_error": null,
       "metrics": {
@@ -4249,7 +4361,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 5993.394
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 5414.876
       },
       "generation_error": null,
       "metrics": {
@@ -4333,7 +4448,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6079.6
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 6708.825
       },
       "generation_error": null,
       "metrics": {
@@ -4417,7 +4535,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6404.061
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8533.687
       },
       "generation_error": null,
       "metrics": {
@@ -4483,7 +4604,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6510.311
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8544.674
       },
       "generation_error": null,
       "metrics": {
@@ -4555,7 +4679,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6520.292
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8584.357
       },
       "generation_error": null,
       "metrics": {
@@ -4620,7 +4747,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6278.078
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8726.317
       },
       "generation_error": null,
       "metrics": {
@@ -4692,7 +4822,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 6236.927
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8574.222
       },
       "generation_error": null,
       "metrics": {
@@ -4765,7 +4898,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 5816.327
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8585.676
       },
       "generation_error": null,
       "metrics": {
@@ -4837,7 +4973,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 8567.415
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 13126.965
       },
       "generation_error": null,
       "metrics": {
@@ -4902,7 +5041,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 5669.814
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8651.943
       },
       "generation_error": null,
       "metrics": {
@@ -4974,7 +5116,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 5685.289
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8700.687
       },
       "generation_error": null,
       "metrics": {
@@ -5039,7 +5184,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 5669.661
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8639.413
       },
       "generation_error": null,
       "metrics": {
@@ -5097,7 +5245,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2877.876
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4282.545
       },
       "generation_error": null,
       "metrics": {
@@ -5155,7 +5306,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2900.358
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4313.559
       },
       "generation_error": null,
       "metrics": {
@@ -5213,7 +5367,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3087.007
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4298.902
       },
       "generation_error": null,
       "metrics": {
@@ -5271,7 +5428,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3185.308
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4238.21
       },
       "generation_error": null,
       "metrics": {
@@ -5329,7 +5489,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3737.807
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4193.555
       },
       "generation_error": null,
       "metrics": {
@@ -5387,7 +5550,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2980.794
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4409.624
       },
       "generation_error": null,
       "metrics": {
@@ -5445,7 +5611,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3012.185
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4327.567
       },
       "generation_error": null,
       "metrics": {
@@ -5479,7 +5648,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3187.726
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4372.327
       },
       "generation_error": null,
       "metrics": {
@@ -5513,7 +5685,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3131.05
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4466.475
       },
       "generation_error": null,
       "metrics": {
@@ -5547,7 +5722,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 3065.874
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4468.063
       },
       "generation_error": null,
       "metrics": {
@@ -5605,7 +5783,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2961.216
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4292.964
       },
       "generation_error": null,
       "metrics": {
@@ -5663,7 +5844,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2897.654
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4246.439
       },
       "generation_error": null,
       "metrics": {
@@ -5721,7 +5905,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2861.481
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4272.61
       },
       "generation_error": null,
       "metrics": {
@@ -5779,7 +5966,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2943.879
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4235.493
       },
       "generation_error": null,
       "metrics": {
@@ -5813,7 +6003,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2972.597
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4412.287
       },
       "generation_error": null,
       "metrics": {
@@ -5869,7 +6062,10 @@
         ],
         "token_usage": 1878,
         "prompt_injection_flagged": false,
-        "latency_ms": 6382.118
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8289.502
       },
       "generation_error": null,
       "metrics": {
@@ -5925,7 +6121,10 @@
         ],
         "token_usage": 2446,
         "prompt_injection_flagged": false,
-        "latency_ms": 6629.227
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8472.977
       },
       "generation_error": null,
       "metrics": {
@@ -5957,7 +6156,10 @@
         ],
         "token_usage": 433,
         "prompt_injection_flagged": false,
-        "latency_ms": 7903.995
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 10657.88
       },
       "generation_error": null,
       "metrics": {
@@ -6015,7 +6217,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2769.84
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4200.803
       },
       "generation_error": null,
       "metrics": {
@@ -6073,7 +6278,10 @@
         ],
         "token_usage": 2177,
         "prompt_injection_flagged": false,
-        "latency_ms": 6433.678
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8416.973
       },
       "generation_error": null,
       "metrics": {
@@ -6131,7 +6339,10 @@
         ],
         "token_usage": 2203,
         "prompt_injection_flagged": false,
-        "latency_ms": 6651.74
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8669.415
       },
       "generation_error": null,
       "metrics": {
@@ -6187,7 +6398,10 @@
         ],
         "token_usage": 2113,
         "prompt_injection_flagged": false,
-        "latency_ms": 6446.922
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8377.922
       },
       "generation_error": null,
       "metrics": {
@@ -6245,7 +6459,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2769.985
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4313.888
       },
       "generation_error": null,
       "metrics": {
@@ -6301,7 +6518,10 @@
         ],
         "token_usage": 1960,
         "prompt_injection_flagged": false,
-        "latency_ms": 6435.568
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8368.805
       },
       "generation_error": null,
       "metrics": {
@@ -6357,7 +6577,10 @@
         ],
         "token_usage": 2145,
         "prompt_injection_flagged": false,
-        "latency_ms": 6407.793
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8308.739
       },
       "generation_error": null,
       "metrics": {
@@ -6383,7 +6606,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2703.861
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4479.735
       },
       "review_status": "pending_manual_review"
     },
@@ -6404,7 +6630,10 @@
         ],
         "token_usage": 2308,
         "prompt_injection_flagged": false,
-        "latency_ms": 6440.801
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 8394.066
       },
       "review_status": "pending_manual_review"
     },
@@ -6425,7 +6654,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2714.464
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4158.385
       },
       "review_status": "pending_manual_review"
     },
@@ -6446,7 +6678,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2774.311
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4259.549
       },
       "review_status": "pending_manual_review"
     },
@@ -6467,7 +6702,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2811.436
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4297.386
       },
       "review_status": "pending_manual_review"
     },
@@ -6488,7 +6726,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 2832.627
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4298.633
       },
       "review_status": "pending_manual_review"
     },
@@ -6507,7 +6748,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.584
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.883
       },
       "review_status": "pending_manual_review"
     },
@@ -6526,7 +6770,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.574
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.778
       },
       "review_status": "pending_manual_review"
     },
@@ -6545,7 +6792,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.528
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.738
       },
       "review_status": "pending_manual_review"
     },
@@ -6564,7 +6814,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.495
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.737
       },
       "review_status": "pending_manual_review"
     },
@@ -6583,7 +6836,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.441
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.66
       },
       "review_status": "pending_manual_review"
     },
@@ -6602,7 +6858,10 @@
         "query_history": [],
         "token_usage": 0,
         "prompt_injection_flagged": false,
-        "latency_ms": 0.512
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 0.743
       },
       "review_status": "pending_manual_review"
     },
@@ -6623,7 +6882,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2905.541
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4285.975
       },
       "review_status": "pending_manual_review"
     },
@@ -6644,7 +6906,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2793.643
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4147.175
       },
       "review_status": "pending_manual_review"
     },
@@ -6665,7 +6930,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2820.911
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4171.318
       },
       "review_status": "pending_manual_review"
     },
@@ -6686,7 +6954,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2825.424
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4121.02
       },
       "review_status": "pending_manual_review"
     },
@@ -6707,7 +6978,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2795.282
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4286.262
       },
       "review_status": "pending_manual_review"
     },
@@ -6728,7 +7002,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2915.447
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4419.537
       },
       "review_status": "pending_manual_review"
     },
@@ -6749,7 +7026,10 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2894.731
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4398.748
       },
       "review_status": "pending_manual_review"
     },
@@ -6770,38 +7050,12 @@
         ],
         "token_usage": 0,
         "prompt_injection_flagged": true,
-        "latency_ms": 2838.338
+        "corrective_pass_used": false,
+        "corrective_fallback_used": false,
+        "missing_subquestions": [],
+        "latency_ms": 4536.594
       },
       "review_status": "pending_manual_review"
     }
-  ],
-  "manual_review": {
-    "method": "Direct inspection of every answer against its expected facts, retrieved excerpts, and cited filenames; no model judge or automated answer score was used.",
-    "reviewed_at": "2026-07-31",
-    "findings": {
-      "generation_errors": 0,
-      "single_factual_answers_with_directly_supporting_citations": 52,
-      "agent_factual_answers_with_directly_supporting_citations": 52,
-      "single_exact_abstentions": 8,
-      "agent_exact_abstentions": 8,
-      "ordinary_agent_queries_with_exactly_one_retrieval": 45,
-      "agent_multi_hop_queries_with_two_to_four_retrievals": 15,
-      "prompt_injection_cases_flagged_and_grounded": 8
-    },
-    "current_reviewed_status": {
-      "single_answer_passed": 60,
-      "single_answer_total": 60,
-      "agent_answer_passed": 60,
-      "agent_answer_total": 60,
-      "adversarial_passed": 20,
-      "adversarial_total": 20,
-      "expected_source_recall": 1.0,
-      "spreadsheet_passed": 15,
-      "spreadsheet_total": 15,
-      "agent_multi_hop_passed": 15,
-      "agent_multi_hop_total": 15,
-      "answer_not_present_passed": 10,
-      "answer_not_present_total": 10
-    }
-  }
+  ]
 }
