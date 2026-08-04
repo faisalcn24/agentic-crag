@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from functions import rag
 from functions.agent import run_agent
+from functions.grounding import extract_grounded_sentence
 
 
 RUN_LIVE_QUALITY_TESTS = os.getenv("AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS") == "1"
@@ -98,9 +99,7 @@ def test_supported_negative_fact_is_not_mistaken_for_an_abstention():
 
     assert rag.ground_generated_answer(
         "Does the current release include authentication?", answer, sources
-    ) == (
-        "The current release does not include authentication. [requirements.docx]"
-    )
+    ) == ("The current release does not include authentication. [requirements.docx]")
 
 
 def test_grounder_rejects_cross_entity_fact_transfer():
@@ -117,11 +116,14 @@ def test_grounder_rejects_cross_entity_fact_transfer():
         },
     ]
 
-    assert rag.ground_generated_answer(
-        "Who designed Project Aster's launch badge?",
-        "Leda Noor designed Project Aster's launch badge. [orion.docx]",
-        sources,
-    ) == ABSTENTION
+    assert (
+        rag.ground_generated_answer(
+            "Who designed Project Aster's launch badge?",
+            "Leda Noor designed Project Aster's launch badge. [orion.docx]",
+            sources,
+        )
+        == ABSTENTION
+    )
 
 
 def test_grounder_rebuilds_citation_from_the_supporting_source():
@@ -169,9 +171,12 @@ def test_extractive_grounding_requires_all_substantive_question_terms():
         },
     ]
 
-    assert rag.extract_grounded_sentence(
-        "What color is Project Aster's launch badge?", sources
-    ) == "The color of Project Aster's launch badge is cobalt blue. [aster.docx]"
+    assert (
+        rag.extract_grounded_sentence(
+            "What color is Project Aster's launch badge?", sources
+        )
+        == "The color of Project Aster's launch badge is cobalt blue. [aster.docx]"
+    )
     assert (
         rag.extract_grounded_sentence(
             "Who designed Project Aster's launch badge?", sources
@@ -186,8 +191,7 @@ def test_grounder_uses_source_context_but_returns_only_the_supporting_sentence()
             "filename": "runbook.docx",
             "type": "docx",
             "text": (
-                "EC2 deployment configuration. "
-                "FastAPI listens on 127.0.0.1:8000."
+                "EC2 deployment configuration. FastAPI listens on 127.0.0.1:8000."
             ),
         }
     ]
@@ -232,9 +236,7 @@ def test_natural_hyphenated_terms_are_grounded_compositionally():
         "The product success target for the demo is to answer at least 85 percent "
         "of fact-seeking test questions correctly when the answer exists."
     )
-    sources = [
-        {"filename": "requirements.docx", "type": "docx", "text": source_text}
-    ]
+    sources = [{"filename": "requirements.docx", "type": "docx", "text": source_text}]
 
     answer = rag.ground_generated_answer(
         "What answer-correctness target is defined for fact-seeking demo questions?",
@@ -255,7 +257,7 @@ def test_extractive_grounding_handles_a_lexical_paraphrase_without_nli():
         }
     ]
 
-    assert rag.answer_grounded_fact(question, sources) == (
+    assert extract_grounded_sentence(question, sources) == (
         "Validate Nginx config with sudo nginx -t. [runbook.docx]"
     )
 
@@ -283,11 +285,9 @@ def test_extractive_grounding_handles_a_lexical_paraphrase_without_nli():
 def test_extractive_grounding_handles_metric_and_rationale_questions(
     question: str, source_text: str, expected: str
 ):
-    sources = [
-        {"filename": "evidence.docx", "type": "docx", "text": source_text}
-    ]
+    sources = [{"filename": "evidence.docx", "type": "docx", "text": source_text}]
 
-    assert rag.answer_grounded_fact(question, sources) == (
+    assert extract_grounded_sentence(question, sources) == (
         f"{expected} [evidence.docx]"
     )
 
@@ -304,7 +304,7 @@ def test_extractive_grounding_uses_the_relation_after_a_version_identifier():
         }
     ]
 
-    assert rag.answer_grounded_fact(
+    assert extract_grounded_sentence(
         "Which fields did version 2.2 store in the registry?", sources
     ) == (
         "Version 2.2 introduced a registry file. The registry stores "
@@ -321,11 +321,14 @@ def test_generated_words_align_with_underscored_evidence_identifiers():
         }
     ]
 
-    assert rag.ground_generated_answer(
-        "Which fields are stored in the registry?",
-        "The registry stores folder path and folder name.",
-        sources,
-    ) == "The registry stores folder_path and folder_name. [releases.docx]"
+    assert (
+        rag.ground_generated_answer(
+            "Which fields are stored in the registry?",
+            "The registry stores folder path and folder name.",
+            sources,
+        )
+        == "The registry stores folder_path and folder_name. [releases.docx]"
+    )
 
 
 @pytest.mark.parametrize(
@@ -347,7 +350,7 @@ def test_relevance_without_the_requested_relation_is_not_support(question: str):
         }
     ]
 
-    assert rag.answer_grounded_fact(question, sources) is None
+    assert extract_grounded_sentence(question, sources) is None
 
 
 def test_grounder_does_not_transfer_a_fact_between_entities_in_one_chunk():
@@ -362,11 +365,14 @@ def test_grounder_does_not_transfer_a_fact_between_entities_in_one_chunk():
         }
     ]
 
-    assert rag.ground_generated_answer(
-        "What material is Project Aster's launch badge made from?",
-        "Project Aster's launch badge is made from titanium.",
-        sources,
-    ) == ABSTENTION
+    assert (
+        rag.ground_generated_answer(
+            "What material is Project Aster's launch badge made from?",
+            "Project Aster's launch badge is made from titanium.",
+            sources,
+        )
+        == ABSTENTION
+    )
 
 
 def test_grounder_rejects_reversed_relation_arguments():
@@ -378,11 +384,14 @@ def test_grounder_rejects_reversed_relation_arguments():
         }
     ]
 
-    assert rag.ground_generated_answer(
-        "How do Project Aster and Project Orion rank?",
-        "Project Orion ranks above Project Aster.",
-        sources,
-    ) == ABSTENTION
+    assert (
+        rag.ground_generated_answer(
+            "How do Project Aster and Project Orion rank?",
+            "Project Orion ranks above Project Aster.",
+            sources,
+        )
+        == ABSTENTION
+    )
 
 
 def test_question_and_expected_answer_text_cannot_become_evidence():
@@ -412,23 +421,17 @@ def test_real_reranker_promotes_semantically_matching_passage():
             node=TextNode(text="Bananas are yellow tropical fruit."), score=0.99
         ),
         NodeWithScore(
-            node=TextNode(
-                text="The EC2 storage path is /opt/agentic-crag/data."
-            ),
+            node=TextNode(text="The EC2 storage path is /opt/agentic-crag/data."),
             score=0.01,
         ),
-        NodeWithScore(
-            node=TextNode(text="Penguins live in cold regions."), score=0.80
-        ),
+        NodeWithScore(node=TextNode(text="Penguins live in cold regions."), score=0.80),
     ]
 
     ranked = rag.get_reranker(top_n=3).postprocess_nodes(
         candidates, query_str="What storage path should EC2 use?"
     )
 
-    assert ranked[0].node.text == (
-        "The EC2 storage path is /opt/agentic-crag/data."
-    )
+    assert ranked[0].node.text == ("The EC2 storage path is /opt/agentic-crag/data.")
     assert ranked[0].score > max(item.score for item in ranked[1:])
 
 
@@ -444,8 +447,6 @@ def test_live_rag_stays_grounded_with_entity_distractors(
     monkeypatch.setenv("OLLAMA_MODEL", "llama3.2:3b")
     monkeypatch.setenv("OLLAMA_PLANNER_MODEL", "llama3.2:3b")
 
-    rag.setup_embeddings()
-    rag.setup_llm()
     index = rag.build_index(
         [
             {

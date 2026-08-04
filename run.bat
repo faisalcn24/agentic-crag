@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo Starting Document Analysis RAG...
+echo Starting Agentic CRAG...
 echo.
 
 REM Prefer the repository virtual environment created by the setup instructions.

@@ -8,19 +8,19 @@ from dataclasses import dataclass
 from time import monotonic, perf_counter
 from typing import Any, Callable, Literal, TypedDict
 
-from .grounding import ground_generated_answer
+from .grounding import (
+    ABSTENTION,
+    extract_grounded_sentence,
+    find_grounded_evidence,
+    ground_generated_answer,
+)
 from .rag import (
-    answer_direct_fact,
-    answer_grounded_fact,
-    answer_public_deployment_risks,
     call_model,
     estimate_tokens,
     retrieve_sources,
 )
 from .multihop import (
-    answer_bounded_multihop_fact,
     decomposition_prompt,
-    deterministic_decomposition,
     fallback_decomposition,
     is_multi_hop_question,
     validate_decomposition,
@@ -28,7 +28,6 @@ from .multihop import (
 from .spreadsheet import (
     answer_spreadsheet_lookup,
     execute_spreadsheet_plan,
-    fallback_spreadsheet_plan,
     format_spreadsheet_answer,
     is_spreadsheet_analysis_question,
     spreadsheet_plan_prompt,
@@ -37,7 +36,6 @@ from .spreadsheet import (
 from .telemetry import log_query_result
 
 
-ABSTENTION = "The answer is not present in the provided documents."
 INJECTION_PATTERNS = (
     "ignore all previous instructions",
     "ignore previous instructions",
@@ -52,23 +50,7 @@ INJECTION_PATTERNS = (
     "new task:",
 )
 
-OUT_OF_SCOPE_PATTERNS = (
-    re.compile(
-        r"\b(?:system prompt|environment secrets?|private (?:ssh )?key|api key)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\b(?:medical diagnosis|diagnos(?:e|is))\b", re.IGNORECASE),
-    re.compile(r"\b(?:predict|forecast)\b.*\b(?:stock|share|market)\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:invent|fabricate|make up)\b.*\b(?:testimonials?|reviews?|quotes?)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(r"\bignore (?:the )?(?:documents?|corpus)\b", re.IGNORECASE),
-)
-
-AgentAction = Literal[
-    "retrieve", "decompose", "multi_retrieve", "answer", "abstain"
-]
+AgentAction = Literal["retrieve", "decompose", "multi_retrieve", "answer", "abstain"]
 
 
 class AgentState(TypedDict, total=False):
@@ -102,7 +84,8 @@ class AgentConfig:
     def from_env(cls) -> "AgentConfig":
         return cls(
             timeout_seconds=min(
-                max(float(os.getenv("AGENTIC_CRAG_AGENT_TIMEOUT_SECONDS", "30")), 1.0), 30.0
+                max(float(os.getenv("AGENTIC_CRAG_AGENT_TIMEOUT_SECONDS", "30")), 1.0),
+                30.0,
             ),
             token_limit=int(os.getenv("AGENTIC_CRAG_AGENT_TOKEN_LIMIT", "12000")),
         )
@@ -148,7 +131,9 @@ def run_agent(
         "confidence": "low",
         "injection_flagged": injection_flagged,
     }
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-crag-agent")
+    executor = ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="agentic-crag-agent"
+    )
     future = executor.submit(_run_workflow, initial_state, config, runtime, progress)
     try:
         state = future.result(timeout=max(0.01, config.timeout_seconds - 0.05))
@@ -158,7 +143,7 @@ def run_agent(
             **initial_state,
             **progress,
             "answer": budget_fallback(
-                progress["sources"],
+                _safe_sources(progress["sources"]),
                 "wall_clock_limit",
                 injection_flagged=progress.get("injection_flagged", False),
             ),
@@ -170,7 +155,7 @@ def run_agent(
             **initial_state,
             **progress,
             "answer": budget_fallback(
-                progress["sources"],
+                _safe_sources(progress["sources"]),
                 f"error:{type(exc).__name__}",
                 injection_flagged=progress.get("injection_flagged", False),
             ),
@@ -194,9 +179,7 @@ def run_agent(
             "token_usage": state.get("total_tokens", 0),
             "prompt_injection_flagged": state.get("injection_flagged", False),
             "corrective_pass_used": state.get("corrective_pass_used", False),
-            "corrective_fallback_used": state.get(
-                "corrective_fallback_used", False
-            ),
+            "corrective_fallback_used": state.get("corrective_fallback_used", False),
             "missing_subquestions": state.get("missing_subquestions", []),
             "latency_ms": round(latency_ms, 3),
         },
@@ -231,9 +214,7 @@ def _run_workflow(
             return None, 0, reason
 
     def planner(state: AgentState) -> dict:
-        if (
-            state.get("injection_flagged") and not state.get("sources")
-        ) or is_clearly_out_of_scope(state["question"]):
+        if state.get("injection_flagged") and not state.get("sources"):
             return {"action": "abstain"}
         if _budget_exhausted(state, config):
             return {
@@ -246,7 +227,6 @@ def _run_workflow(
             return {"action": "retrieve", "current_query": state["question"]}
         prompt = (
             "Turn the latest document question into a standalone retrieval query without adding facts. "
-            "Ordinary factual questions must always be retrieved; policy refusals have already been handled. "
             "Return JSON only: "
             '{"query":"standalone query"}.\n'
             f"Conversation history:\n{_history_text(state.get('history', []))}\nQuestion: {state['question']}"
@@ -267,16 +247,8 @@ def _run_workflow(
         }
 
     def decompose(state: AgentState) -> dict:
-        deterministic = deterministic_decomposition(state["question"])
-        if deterministic is not None:
-            return {
-                "action": "multi_retrieve",
-                "subquestions": deterministic,
-            }
         prompt = decomposition_prompt(state["question"])
-        text, tokens, failure = complete_node(
-            state, prompt, "decomposition", 512
-        )
+        text, tokens, failure = complete_node(state, prompt, "decomposition", 512)
         if failure in {"token_limit", "wall_clock_limit"}:
             return {"action": "answer", "termination_reason": failure}
         data = _json_object(text or "")
@@ -322,8 +294,7 @@ def _run_workflow(
             sources = runtime.retrieve(subquestion, config.retrieve_top_k)
             query_history.append(subquestion)
             injection = injection or any(
-                contains_prompt_injection(source.get("text", ""))
-                for source in sources
+                contains_prompt_injection(source.get("text", "")) for source in sources
             )
             results.append({"question": subquestion, "sources": sources})
             for source in sources:
@@ -357,12 +328,6 @@ def _run_workflow(
         """Check each retrieval leg, then allow exactly one corrective pass."""
         results = state.get("subquestion_results", [])
         questions = [item.get("question", "") for item in results]
-        safe_sources = _safe_sources(state.get("sources", []))
-        if answer_bounded_multihop_fact(state["question"], safe_sources):
-            return {
-                "action": "answer",
-                "missing_subquestions": [],
-            }
 
         review_results, missing = _coverage_inputs(results)
         coverage_tokens = 0
@@ -420,8 +385,7 @@ def _run_workflow(
             corrective_queries = _fallback_corrective_queries(missing)
 
         updated_results = [
-            {"question": item["question"], "sources": list(item.get("sources", []))}
-            for item in results
+            {**item, "sources": list(item.get("sources", []))} for item in results
         ]
         all_sources = list(state.get("sources", []))
         seen_sources = {
@@ -439,8 +403,7 @@ def _run_workflow(
             item["sources"].extend(sources)
             query_history.append(query)
             injection = injection or any(
-                contains_prompt_injection(source.get("text", ""))
-                for source in sources
+                contains_prompt_injection(source.get("text", "")) for source in sources
             )
             for source in sources:
                 marker = (
@@ -460,22 +423,6 @@ def _run_workflow(
                 "injection_flagged": injection,
             }
         )
-        if answer_bounded_multihop_fact(
-            state["question"], _safe_sources(all_sources)
-        ):
-            return {
-                "action": "answer",
-                "sources": all_sources,
-                "subquestion_results": updated_results,
-                "iterations": iterations,
-                "query_history": query_history,
-                "injection_flagged": injection,
-                "corrective_pass_used": True,
-                "corrective_fallback_used": corrective_fallback_used,
-                "missing_subquestions": [],
-                "total_tokens": total_tokens,
-                "confidence": "medium",
-            }
         revalidation_results = [
             item for item in updated_results if item["question"] in corrective_queries
         ]
@@ -565,15 +512,6 @@ def _run_workflow(
             else ""
         )
         if state.get("subquestion_results"):
-            bounded_answer = answer_bounded_multihop_fact(
-                state["question"], safe_sources
-            )
-            if bounded_answer:
-                return {
-                    "answer": prefix + bounded_answer,
-                    "confidence": "high",
-                    "termination_reason": reason or "answered",
-                }
             prompt = (
                 "Answer the multi-part document question using only the evidence grouped by "
                 "subquestion below. Cover every supported required fact and make the relationship "
@@ -604,46 +542,34 @@ def _run_workflow(
                 (text or "").strip() or ABSTENTION,
                 safe_sources,
             )
+            if not _covers_verified_evidence(
+                generated_answer, state["subquestion_results"]
+            ):
+                generated_answer = _verified_evidence_answer(
+                    state["subquestion_results"]
+                )
             return {
                 "answer": prefix + generated_answer,
                 "total_tokens": state["total_tokens"] + tokens,
                 "confidence": state.get("confidence", "low"),
                 "termination_reason": reason or "answered",
             }
-        risk_answer = answer_public_deployment_risks(state["question"], safe_sources)
-        if risk_answer:
-            return {
-                "answer": prefix + risk_answer,
-                "confidence": state.get("confidence", "low"),
-                "termination_reason": reason or "answered",
-            }
         if is_spreadsheet_analysis_question(state["question"], safe_sources):
-            plan = fallback_spreadsheet_plan(state["question"], safe_sources)
-            tokens = 0
-            if plan is None:
-                plan_prompt = spreadsheet_plan_prompt(state["question"], safe_sources)
-                text, tokens, _failure = complete_node(
-                    state, plan_prompt, "spreadsheet_plan", 512
-                )
-                data = _json_object(text or "")
-                plan = validate_spreadsheet_plan(data, safe_sources)
+            plan_prompt = spreadsheet_plan_prompt(state["question"], safe_sources)
+            text, tokens, _failure = complete_node(
+                state, plan_prompt, "spreadsheet_plan", 512
+            )
+            data = _json_object(text or "")
+            plan = validate_spreadsheet_plan(data, safe_sources)
             result = execute_spreadsheet_plan(safe_sources, plan) if plan else None
             if result:
                 return {
-                    "answer": prefix
-                    + format_spreadsheet_answer(state["question"], result),
+                    "answer": prefix + format_spreadsheet_answer(result),
                     "sources": [result["evidence"]],
                     "total_tokens": state["total_tokens"] + tokens,
                     "confidence": "high",
                     "termination_reason": reason or "answered",
                 }
-        direct_answer = answer_direct_fact(state["question"], safe_sources)
-        if direct_answer:
-            return {
-                "answer": prefix + direct_answer,
-                "confidence": state.get("confidence", "low"),
-                "termination_reason": reason or "answered",
-            }
         spreadsheet_answer = answer_spreadsheet_lookup(state["question"], safe_sources)
         if spreadsheet_answer:
             return {
@@ -651,9 +577,7 @@ def _run_workflow(
                 "confidence": state.get("confidence", "low"),
                 "termination_reason": reason or "answered",
             }
-        extractive_answer = answer_grounded_fact(
-            state["question"], safe_sources
-        )
+        extractive_answer = extract_grounded_sentence(state["question"], safe_sources)
         if extractive_answer:
             return {
                 "answer": prefix + extractive_answer,
@@ -666,8 +590,6 @@ def _run_workflow(
             "requested number and explain how each reason answers the question; ignore unrelated rows and examples. "
             "Verify the question's premise against the evidence. If the premise is false, correct it explicitly; "
             "if the requested entity is not named, abstain instead of substituting a different tool or provider. "
-            "When a question concerns the safety of public sharing, prioritize security and privacy exposure rather "
-            "than unrelated installation or reliability issues. "
             "Unless the question explicitly requests multiple items, reasons, or an explanation, return exactly one "
             "factual sentence. Include any condition or location directly attached to the requested fact in the "
             "evidence. Do not return a citation without an answer, and do not add meta-commentary about why the "
@@ -745,10 +667,6 @@ def _run_workflow(
 def contains_prompt_injection(text: str) -> bool:
     lowered = text.casefold()
     return any(pattern in lowered for pattern in INJECTION_PATTERNS)
-
-
-def is_clearly_out_of_scope(text: str) -> bool:
-    return any(pattern.search(text) for pattern in OUT_OF_SCOPE_PATTERNS)
 
 
 def budget_fallback(
@@ -832,6 +750,11 @@ def _coverage_inputs(
         sources = _safe_sources(item.get("sources", []))
         if not sources:
             missing.append(question)
+        elif evidence := find_grounded_evidence(question, sources):
+            item["verified_evidence"] = {
+                "filename": evidence.filename,
+                "quote": evidence.text,
+            }
         else:
             needs_model_review.append(item)
     return needs_model_review, missing
@@ -875,6 +798,7 @@ def _validate_evidence_coverage(
         )
         if quote_is_exact:
             covered.append(question)
+            item["verified_evidence"] = {"filename": filename, "quote": quote}
         else:
             missing.append(question)
     return covered, missing
@@ -927,9 +851,7 @@ def _validate_corrective_queries(
         required_identifiers = re.findall(
             r"\b[A-Za-z]{1,5}-\d{3}\b|\b\d+\.\d+\b", subquery
         )
-        query_identifiers = re.findall(
-            r"\b[A-Za-z]{1,5}-\d{3}\b|\b\d+\.\d+\b", cleaned
-        )
+        query_identifiers = re.findall(r"\b[A-Za-z]{1,5}-\d{3}\b|\b\d+\.\d+\b", cleaned)
         allowed_terms = _focus_tokens(subquery) | {
             "detail",
             "details",
@@ -960,9 +882,7 @@ def _validate_corrective_queries(
                 identifier.casefold() not in cleaned.casefold()
                 for identifier in required_identifiers
             )
-            or {
-                identifier.casefold() for identifier in query_identifiers
-            }
+            or {identifier.casefold() for identifier in query_identifiers}
             - {identifier.casefold() for identifier in required_identifiers}
             or _focus_tokens(cleaned) - allowed_terms
         ):
@@ -979,21 +899,38 @@ def _fallback_corrective_queries(missing: list[str]) -> dict[str, str]:
     }
 
 
+def _verified_evidence_answer(results: list[dict[str, Any]]) -> str:
+    parts = []
+    for item in results:
+        evidence = item.get("verified_evidence", {})
+        filename = evidence.get("filename")
+        quote = evidence.get("quote")
+        if filename and quote:
+            statement = f"{quote} [{filename}]"
+            if statement not in parts:
+                parts.append(statement)
+    return " ".join(parts) if parts else ABSTENTION
+
+
+def _covers_verified_evidence(answer: str, results: list[dict[str, Any]]) -> bool:
+    normalized_answer = " ".join(answer.casefold().split())
+    quotes = [
+        evidence.get("quote", "")
+        for item in results
+        if (evidence := item.get("verified_evidence", {}))
+    ]
+    return bool(quotes) and all(
+        " ".join(quote.casefold().split()) in normalized_answer for quote in quotes
+    )
+
+
 def _focused_evidence(text: str, question: str, max_chars: int = 1200) -> str:
     units = [
         unit.strip()
         for unit in (
-            text.splitlines()
-            if " | " in text
-            else re.split(r"(?<=[.!?])\s+|\n+", text)
+            text.splitlines() if " | " in text else re.split(r"(?<=[.!?])\s+|\n+", text)
         )
-        if unit.strip()
-        and not unit.strip().endswith("?")
-        and not re.match(
-            r"^(?:expected (?:answer|source)|question(?:\s+[a-z0-9]+)?)\s*:",
-            unit.strip(),
-            re.IGNORECASE,
-        )
+        if unit.strip() and not unit.strip().endswith("?")
     ]
     if not units:
         return ""
@@ -1035,9 +972,7 @@ def _rank_subquestion_sources(
     question_tokens = _focus_tokens(question)
     return sorted(
         sources,
-        key=lambda source: len(
-            question_tokens & _focus_tokens(source.get("text", ""))
-        ),
+        key=lambda source: len(question_tokens & _focus_tokens(source.get("text", ""))),
         reverse=True,
     )
 

@@ -7,7 +7,6 @@ import re
 import shutil
 import threading
 from collections import Counter
-from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,25 +16,14 @@ import openpyxl
 from docx import Document
 from llama_index.core import Document as LlamaDocument
 from llama_index.core import (
-    PromptTemplate,
     Settings,
     StorageContext,
     VectorStoreIndex,
     load_index_from_storage,
 )
-from llama_index.core.chat_engine import CondenseQuestionChatEngine
-from llama_index.core.llms import (
-    ChatMessage,
-    CompletionResponse,
-    CustomLLM,
-    LLMMetadata,
-    MessageRole,
-)
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import SentenceTransformerRerank
-from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.schema import NodeWithScore, QueryBundle
+from llama_index.core.schema import NodeWithScore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from openai import OpenAI
 from pypdf import PdfReader
@@ -44,15 +32,15 @@ from .grounding import (
     extract_grounded_sentence,
     ground_generated_answer,
 )
-from .multihop import DECOMPOSITION_SCHEMA, answer_bounded_multihop_fact
+from .multihop import DECOMPOSITION_SCHEMA
 from .spreadsheet import (
     SPREADSHEET_PLAN_SCHEMA,
     answer_spreadsheet_lookup,
     execute_spreadsheet_plan,
-    fallback_spreadsheet_plan,
     format_spreadsheet_answer,
     is_spreadsheet_analysis_question,
-    parse_spreadsheet_row,
+    spreadsheet_plan_prompt,
+    validate_spreadsheet_plan,
 )
 
 
@@ -81,9 +69,7 @@ MAX_SPREADSHEET_SOURCE_TEXT_CHARS = 6000
 STRUCTURED_OUTPUT_SCHEMAS = {
     "planner": {
         "type": "object",
-        "properties": {
-            "query": {"type": "string", "minLength": 1, "maxLength": 500}
-        },
+        "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 500}},
         "required": ["query"],
         "additionalProperties": False,
     },
@@ -156,66 +142,11 @@ SYSTEM_PROMPT = (
     "For spreadsheets, report values exactly as they appear, match every requested label and value from the same "
     "row, and do not substitute a nearby row or field. "
     "For calculations, show the raw figures and working. "
-    "For multi-part questions, answer every requested part using context directly relevant to that part; ignore "
-    "nearby but unrelated evaluation examples. Do not contradict your own conclusion or add a second interpretation. "
+    "For multi-part questions, answer every requested part using context directly relevant to that part. "
+    "Do not contradict your own conclusion or add a second interpretation. "
     "If the retrieved context does not contain the answer, return exactly: "
     "The answer is not present in the provided documents."
 )
-
-# Answer-synthesis prompt for the query engine. Carries the grounding/citation rules
-# above so they still apply when running through the re-ranking query engine.
-QA_PROMPT = PromptTemplate(
-    SYSTEM_PROMPT + "\n\n"
-    "Context information from the documents is below.\n"
-    "---------------------\n"
-    "{context_str}\n"
-    "---------------------\n"
-    "Using only the context above and not prior knowledge, answer the question.\n"
-    "Question: {query_str}\n"
-    "Answer: "
-)
-
-
-class GroqCompatibleLLM(CustomLLM):
-    model: str
-    api_key: str
-    api_base: str = "https://api.groq.com/openai/v1"
-    timeout: float = 120.0
-    temperature: float = 0.0
-    max_tokens: int | None = None
-
-    @property
-    def metadata(self) -> LLMMetadata:
-        return LLMMetadata(
-            context_window=131072,
-            num_output=self.max_tokens or 1024,
-            is_chat_model=True,
-            model_name=self.model,
-        )
-
-    def complete(
-        self, prompt: str, formatted: bool = False, **kwargs: Any
-    ) -> CompletionResponse:
-        client = OpenAI(
-            api_key=self.api_key, base_url=self.api_base, timeout=self.timeout
-        )
-        request = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": kwargs.get("temperature", self.temperature),
-        }
-        max_tokens = kwargs.get("max_tokens", self.max_tokens)
-        if max_tokens is not None:
-            request["max_tokens"] = max_tokens
-
-        response = client.chat.completions.create(**request)
-        text = response.choices[0].message.content or ""
-        return CompletionResponse(text=text, raw=response)
-
-    def stream_complete(
-        self, prompt: str, formatted: bool = False, **kwargs: Any
-    ) -> Generator[CompletionResponse, None, None]:
-        yield self.complete(prompt, formatted=formatted, **kwargs)
 
 
 @dataclass
@@ -392,7 +323,6 @@ def update_registry(index_id: str, folder_path: Path, raw_docs: list[dict]) -> d
 _runtime_lock = threading.Lock()
 _embedding_model = None
 _ocr_engine = None
-_llms: dict[tuple[str, ...], Any] = {}
 _loaded_indexes: dict[str, tuple[int, Any]] = {}
 _keyword_indexes: WeakKeyDictionary[Any, _KeywordCorpus] = WeakKeyDictionary()
 
@@ -401,65 +331,14 @@ def setup_embeddings() -> None:
     global _embedding_model
     with _runtime_lock:
         if _embedding_model is None:
-            _embedding_model = HuggingFaceEmbedding(
-                model_name="BAAI/bge-small-en-v1.5"
-            )
+            _embedding_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
         Settings.embed_model = _embedding_model
-
-
-def setup_llm() -> None:
-    """Configure the answer LLM from AGENTIC_CRAG_LLM_PROVIDER."""
-    provider = os.getenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama").strip().lower()
-    if provider == "ollama":
-        key = (
-            provider,
-            os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
-            os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-            os.getenv("OLLAMA_CONTEXT_WINDOW", "8192"),
-        )
-    elif provider == "groq":
-        key = (
-            provider,
-            os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
-            os.getenv("GROQ_API_KEY", ""),
-        )
-    else:
-        raise RuntimeError(
-            f"Unknown AGENTIC_CRAG_LLM_PROVIDER '{provider}' (expected 'groq' or 'ollama')"
-        )
-    with _runtime_lock:
-        if key not in _llms:
-            _llms[key] = (
-                _build_ollama_llm() if provider == "ollama" else _build_groq_llm()
-            )
-        Settings.llm = _llms[key]
-
-
-def _build_groq_llm() -> GroqCompatibleLLM:
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is required for Groq-backed chat")
-    return GroqCompatibleLLM(
-        model=os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL), api_key=api_key
-    )
-
-
-def _build_ollama_llm():
-    from llama_index.llms.ollama import Ollama
-
-    return Ollama(
-        model=os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
-        base_url=os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
-        request_timeout=120.0,
-        temperature=0.0,
-        context_window=int(os.getenv("OLLAMA_CONTEXT_WINDOW", "8192")),
-    )
 
 
 def call_model(
     prompt: str, *, node: str, timeout: float = 30.0, model: str | None = None
 ) -> tuple[str, int]:
-    """Call the configured provider directly for bounded agent nodes."""
+    """Call the configured generation provider."""
     provider = os.getenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama").strip().lower()
     if provider == "ollama":
         selected_model = model or os.getenv(
@@ -537,411 +416,85 @@ def get_reranker(top_n: int = RERANK_TOP_N) -> SentenceTransformerRerank:
     return _rerankers[top_n]
 
 
-def answer_grounded_fact(
-    question: str, sources: list[dict[str, Any]]
-) -> str | None:
-    """Return evidence only when deterministic same-span constraints pass."""
-    return extract_grounded_sentence(question, sources)
-
-
 def ask_index_with_sources(
     index, message: str, history: list[dict] | None = None
 ) -> dict[str, Any]:
-    setup_llm()
-    query_engine = RetrieverQueryEngine.from_args(
-        retriever=_HybridRetriever(index, RERANK_TOP_N),
-        text_qa_template=QA_PROMPT,
-    )
-    chat_history = _to_chat_messages(history)
-    if chat_history:
-        # Condense the conversation + latest message into a standalone query (one Groq
-        # call) so vector search sees a searchable question instead of a bare follow-up.
-        response = CondenseQuestionChatEngine.from_defaults(
-            query_engine=query_engine
-        ).chat(message, chat_history=chat_history)
-    else:
-        response = query_engine.query(message)
-    sources = format_source_nodes(getattr(response, "source_nodes", []), query=message)
-    answer = answer_bounded_multihop_fact(message, sources)
-    if answer is None:
-        answer = answer_public_deployment_risks(message, sources)
-    if answer is None and is_spreadsheet_analysis_question(message, sources):
-        plan = fallback_spreadsheet_plan(message, sources)
-        result = execute_spreadsheet_plan(sources, plan) if plan else None
-        if result:
-            answer = format_spreadsheet_answer(message, result)
-            sources = [result["evidence"]]
-    if answer is None:
-        answer = answer_direct_fact(message, sources)
+    query = _standalone_query(message, history or [])
+    sources = retrieve_sources(index, query, top_k=RERANK_TOP_N)
+
+    answer = _spreadsheet_answer(message, sources)
     if answer is None:
         answer = answer_spreadsheet_lookup(message, sources)
     if answer is None:
-        answer = answer_grounded_fact(message, sources)
+        answer = extract_grounded_sentence(message, sources)
     if answer is None:
-        answer = ground_generated_answer(message, str(response), sources)
+        generated, _ = call_model(
+            _answer_prompt(message, sources), node="synthesis", timeout=120.0
+        )
+        answer = ground_generated_answer(message, generated, sources)
     return {"answer": answer, "sources": sources}
 
 
-def ensure_source_citations(answer: str, sources: list[dict[str, Any]]) -> str:
-    stripped = answer.strip()
-    if not stripped or "not present in the provided documents" in stripped.casefold():
-        return stripped
-    if re.search(r"\[[^\[\]\n]+\]", stripped):
-        return stripped
-    if not sources:
-        return stripped
-    filename = sources[0].get("filename", "unknown")
-    return f"{stripped}\n\nSource: [{filename}]"
-
-
-def answer_direct_fact(question: str, sources: list[dict[str, Any]]) -> str | None:
-    """Extract exact identifiers and explicit included/supported facts from evidence."""
-    if {"deployment", "ports"} <= _lookup_tokens(question):
-        for source in sources:
-            text = source.get("text", "")
-            sentences = [
-                sentence.strip()
-                for sentence in re.split(r"(?<=[.!?])\s+|\n+", text)
-                if sentence.strip()
-            ]
-            relevant = [
-                sentence
-                for sentence in sentences
-                if (
-                    "listen" in sentence.casefold()
-                    and _lookup_tokens(sentence)
-                    & {"fastapi", "streamlit", "nginx"}
-                )
-            ]
-            joined = " ".join(relevant)
-            if all(
-                value in joined
-                for value in ("127.0.0.1:8000", "127.0.0.1:8501", "port 80")
-            ):
-                return f"{joined} [{source.get('filename', 'unknown')}]"
-
-    if re.search(
-        r"\bdoes\b.+\binclude\b.+\bauthentication\b",
-        question,
-        re.IGNORECASE,
-    ):
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                {"authentication", "include", "not"} <= _lookup_tokens(sentence)
-                and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = candidates[0]
-            return f"{sentence} [{filename}]"
-
-    if {"windows", "storage"} <= _lookup_tokens(question):
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                ".agentic_crag_data" in sentence
-                and "windows" in sentence.casefold()
-                and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = candidates[0]
-            return f"{sentence} [{filename}]"
-
-    code_match = re.search(r"\b[A-Z]{1,5}-\d{3}\b", question, re.IGNORECASE)
-    if code_match:
-        code = code_match.group(0).casefold()
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                code in sentence.casefold() and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = max(
-                candidates,
-                key=lambda item: len(
-                    _lookup_tokens(question) & _lookup_tokens(item[1])
-                ),
-            )
-            return f"{sentence} [{filename}]"
-
-    which_match = re.search(
-        r"\bwhich\s+(.+?)\s+(?:is|are|does|do)\b", question, re.IGNORECASE
-    )
-    if which_match:
-        subject_tokens = _lookup_tokens(which_match.group(1))
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                subject_tokens
-                and subject_tokens <= _lookup_tokens(sentence)
-                and _lookup_tokens(sentence) & {"no", "not", "none", "without"}
-                and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = max(
-                candidates,
-                key=lambda item: len(
-                    _lookup_tokens(question) & _lookup_tokens(item[1])
-                ),
-            )
-            return f"{sentence} [{filename}]"
-
-    can_match = re.search(r"\bcan\s+(.+?)\??$", question, re.IGNORECASE)
-    if can_match:
-        subject_tokens = _lookup_tokens(can_match.group(1))
-        candidates = []
-        for source in sources:
-            sentences = [
-                sentence.strip()
-                for sentence in re.split(
-                    r"(?<=[.!?])\s+|\n+", source.get("text", "")
-                )
-                if sentence.strip()
-            ]
-            for position, sentence in enumerate(sentences):
-                sentence_tokens = _lookup_tokens(sentence)
-                if not (
-                    subject_tokens <= sentence_tokens
-                    and sentence_tokens & {"no", "not", "none", "without"}
-                    and _is_declarative_fact(sentence)
-                ):
-                    continue
-                combined = sentence
-                if position + 1 < len(sentences):
-                    following = sentences[position + 1]
-                    if _lookup_tokens(following) & {"must", "require", "required"}:
-                        combined += f" {following}"
-                candidates.append(
-                    (
-                        len(_lookup_tokens(question) & sentence_tokens),
-                        source.get("filename", "unknown"),
-                        combined,
-                    )
-                )
-        if candidates:
-            _, filename, sentence = max(candidates, key=lambda item: item[0])
-            return f"{sentence} [{filename}]"
-
-    if re.search(r"\bwhen\b.+\b(?:rebuild|rebuilt)\b", question, re.IGNORECASE):
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                "rebuil" in sentence.casefold()
-                and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = max(
-                candidates,
-                key=lambda item: len(
-                    _lookup_tokens(question) & _lookup_tokens(item[1])
-                ),
-            )
-            return f"{sentence} [{filename}]"
-
-    if re.search(r"\bwhich\b.+\bservices?\b", question, re.IGNORECASE):
-        candidates = _matching_sentences(
-            sources,
-            lambda sentence: (
-                "service" in sentence.casefold()
-                and len(
-                    re.findall(
-                        r"\bagentic-crag-[a-z0-9-]+\b", sentence, re.IGNORECASE
-                    )
-                )
-                >= 2
-                and _is_declarative_fact(sentence)
-            ),
-        )
-        if candidates:
-            filename, sentence = candidates[0]
-            return f"{sentence} [{filename}]"
-
-    if re.search(r"\b(?:S3|OCR)\b", question, re.IGNORECASE):
-        premise_answer = _negative_premise_fact(question, sources)
-        if premise_answer:
-            return premise_answer
-
-    boolean_match = re.search(
-        r"\b(?:is|are)\s+(.+?)\s+(?:included|supported|enabled|available)\b",
-        question,
-        re.IGNORECASE,
-    )
-    if not boolean_match:
-        return None
-    subject_tokens = _lookup_tokens(boolean_match.group(1))
-    if not subject_tokens:
-        return None
-    fact_terms = ("include", "support", "enable", "available", "process")
-    candidates = _matching_sentences(
-        sources,
-        lambda sentence: (
-            _is_declarative_fact(sentence)
-            and subject_tokens <= _lookup_tokens(sentence)
-            and any(term in sentence.casefold() for term in fact_terms)
-        ),
-    )
-    if not candidates:
-        return None
-    filename, sentence = max(
-        candidates,
-        key=lambda item: len(subject_tokens & _lookup_tokens(item[1])),
-    )
-    return f"{sentence} [{filename}]"
-
-
-def answer_public_deployment_risks(
-    question: str, sources: list[dict[str, Any]]
-) -> str | None:
-    """Select the two strongest structured security/privacy risks for public sharing."""
-    question_tokens = _lookup_tokens(question)
-    if not (
-        "public" in question_tokens
-        and question_tokens & {"unsafe", "safety", "long", "sharing", "deployment"}
-        and question_tokens & {"two", "reasons", "risks"}
-    ):
-        return None
-    ranking_tokens = _public_safety_tokens(question_tokens)
-    candidates = []
-    for source in sources:
-        if source.get("type") != "xlsx":
-            continue
-        for line in source.get("text", "").splitlines():
-            row = parse_spreadsheet_row(line)
-            if not {"Risk_ID", "Risk", "Mitigation"} <= row.keys():
-                continue
-            score = len(ranking_tokens & _lookup_tokens(" ".join(row.values())))
-            candidates.append((score, source.get("filename", "unknown"), row))
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    if len(candidates) < 2 or candidates[1][0] < 2:
-        return None
-    parts = []
-    for position, (_, filename, row) in enumerate(candidates[:2], start=1):
-        parts.append(
-            f"{position}. {row['Risk_ID']}: {row['Risk']}. "
-            f"Mitigation: {row['Mitigation']}. [{filename}]"
-        )
-    return "\n".join(parts)
-
-
-def _matching_sentences(sources, predicate) -> list[tuple[str, str]]:
-    matches = []
-    for source in sources:
-        filename = source.get("filename", "unknown")
-        sentences = re.split(r"(?<=[.!?])\s+|\n+", source.get("text", ""))
-        for sentence in sentences:
-            cleaned = sentence.strip()
-            if cleaned and predicate(cleaned):
-                matches.append((filename, cleaned))
-    return matches
-
-
-def _is_declarative_fact(sentence: str) -> bool:
-    lowered = sentence.lstrip().casefold()
-    return "?" not in sentence and not lowered.startswith(("question ", "example "))
-
-
-def _negative_premise_fact(
-    question: str, sources: list[dict[str, Any]]
-) -> str | None:
-    topic_stop = {
-        "accuracy",
-        "bucket",
-        "current",
-        "exact",
-        "indexes",
-        "local",
-        "pipeline",
-        "production",
-        "provider",
-        "release",
-        "stores",
-        "used",
-        "users",
-    }
-    topics = _lookup_tokens(question) - topic_stop
-    candidates = []
-    for source in sources:
-        sentences = [
-            sentence.strip()
-            for sentence in re.split(
-                r"(?<=[.!?])\s+|\n+", source.get("text", "")
-            )
-            if sentence.strip()
-        ]
-        for position, sentence in enumerate(sentences):
-            sentence_topics = _lookup_tokens(sentence)
-            overlap = topics & sentence_topics
-            if not (
-                overlap
-                and sentence_topics & {"no", "not", "none", "without"}
-                and _is_declarative_fact(sentence)
-            ):
-                continue
-            combined = sentence
-            if position + 1 < len(sentences):
-                following = sentences[position + 1]
-                following_tokens = _lookup_tokens(following)
-                if following_tokens & {"local", "must", "require", "required"}:
-                    combined += f" {following}"
-            candidates.append(
-                (
-                    len(overlap),
-                    source.get("filename", "unknown"),
-                    combined,
-                )
-            )
-    if not candidates:
-        return None
-    _, filename, sentence = max(candidates, key=lambda item: item[0])
-    return f"{sentence} [{filename}]"
-
-
-def _lookup_tokens(text: str) -> set[str]:
-    stop_words = {
-        "a",
-        "and",
-        "at",
-        "did",
-        "for",
-        "how",
-        "is",
-        "on",
-        "the",
-        "to",
-        "was",
-        "what",
-        "which",
-    }
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", text.casefold())
-        if token not in stop_words
-    }
-
-
-def _to_chat_messages(history: list[dict] | None) -> list[ChatMessage]:
+def _standalone_query(message: str, history: list[dict]) -> str:
     if not history:
-        return []
-    roles = {
-        "user": MessageRole.USER,
-        "assistant": MessageRole.ASSISTANT,
-        "system": MessageRole.SYSTEM,
-    }
-    messages = []
-    for turn in history:
-        content = (turn.get("content") or "").strip()
-        if content:
-            messages.append(
-                ChatMessage(
-                    role=roles.get(turn.get("role"), MessageRole.USER), content=content
-                )
-            )
-    return messages
+        return message
+    conversation = "\n".join(
+        f"{turn.get('role', 'user')}: {turn.get('content', '')[:500]}"
+        for turn in history[-4:]
+    )
+    prompt = (
+        "Rewrite the latest document question as one standalone retrieval query. "
+        "Use conversation context only to resolve references; do not add facts.\n"
+        f"Conversation:\n{conversation}\nQuestion: {message}"
+    )
+    text, _ = call_model(prompt, node="planner", timeout=30.0)
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if match:
+        try:
+            query = json.loads(match.group(0)).get("query", "").strip()
+            if 1 <= len(query) <= 500:
+                return query
+        except (AttributeError, json.JSONDecodeError):
+            pass
+    last_user = next(
+        (
+            turn.get("content", "").strip()
+            for turn in reversed(history)
+            if turn.get("role") == "user" and turn.get("content", "").strip()
+        ),
+        "",
+    )
+    return f"{last_user} {message}".strip()
+
+
+def _spreadsheet_answer(question: str, sources: list[dict[str, Any]]) -> str | None:
+    if not is_spreadsheet_analysis_question(question, sources):
+        return None
+    text, _ = call_model(
+        spreadsheet_plan_prompt(question, sources),
+        node="spreadsheet_plan",
+        timeout=30.0,
+    )
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        plan = validate_spreadsheet_plan(json.loads(match.group(0)), sources)
+    except json.JSONDecodeError:
+        return None
+    result = execute_spreadsheet_plan(sources, plan) if plan else None
+    return format_spreadsheet_answer(result) if result else None
+
+
+def _answer_prompt(question: str, sources: list[dict[str, Any]]) -> str:
+    evidence = "\n\n".join(
+        f"SOURCE: {source.get('filename', 'unknown')}\n{source.get('text', '')}"
+        for source in sources
+    )
+    return (
+        f"{SYSTEM_PROMPT}\n\n<evidence>\n{evidence}\n</evidence>\n"
+        f"Question: {question}\nAnswer:"
+    )
 
 
 def retrieve_sources(
@@ -950,18 +503,6 @@ def retrieve_sources(
     top_k = min(max(int(top_k), 1), RETRIEVE_TOP_K)
     reranked = _retrieve_hybrid_nodes(index, query, top_k)
     return format_source_nodes(reranked, query=query)
-
-
-class _HybridRetriever(BaseRetriever):
-    def __init__(self, index, top_k: int):
-        super().__init__()
-        self._index = index
-        self._top_k = top_k
-
-    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
-        return _retrieve_hybrid_nodes(
-            self._index, query_bundle.query_str, self._top_k
-        )
 
 
 def _retrieve_hybrid_nodes(index, query: str, top_k: int) -> list[NodeWithScore]:
@@ -998,12 +539,15 @@ def _bm25_candidates(index, query: str, top_k: int) -> list[NodeWithScore]:
                 continue
             document_frequency = corpus.document_frequencies[token]
             inverse_frequency = math.log(
-                1 + (document_count - document_frequency + 0.5)
+                1
+                + (document_count - document_frequency + 0.5)
                 / (document_frequency + 0.5)
             )
             length_ratio = document_length / corpus.average_length
-            score += inverse_frequency * (frequency * 2.2) / (
-                frequency + 1.2 * (0.25 + 0.75 * length_ratio)
+            score += (
+                inverse_frequency
+                * (frequency * 2.2)
+                / (frequency + 1.2 * (0.25 + 0.75 * length_ratio))
             )
         if score:
             ranked.append(NodeWithScore(node=node, score=score))
@@ -1016,11 +560,7 @@ def _get_keyword_corpus(index) -> _KeywordCorpus:
     if cached:
         return cached
 
-    nodes = [
-        node
-        for node in index.docstore.docs.values()
-        if _node_text(node).strip()
-    ]
+    nodes = [node for node in index.docstore.docs.values() if _node_text(node).strip()]
     token_counts = [Counter(_search_tokens(_node_text(node))) for node in nodes]
     document_frequencies: Counter[str] = Counter()
     for counts in token_counts:
@@ -1077,8 +617,8 @@ def _promote_exact_identifier_matches(
         return nodes
     return sorted(
         nodes,
-        key=lambda item: not identifiers.intersection(
-            _search_tokens(_node_text(item.node))
+        key=lambda item: (
+            not identifiers.intersection(_search_tokens(_node_text(item.node)))
         ),
     )
 
@@ -1120,29 +660,14 @@ def _spreadsheet_excerpt(text: str, query: str, max_rows: int = 4) -> str:
         return text
     if len(rows) <= max_rows:
         return text
-    query_tokens = _lookup_tokens(query)
-    if query_tokens & {"public", "security", "unsafe", "privacy"}:
-        query_tokens = _public_safety_tokens(query_tokens)
+    query_tokens = set(_search_tokens(query))
     ranked = sorted(
         enumerate(rows),
-        key=lambda item: len(query_tokens & _lookup_tokens(item[1])),
+        key=lambda item: len(query_tokens & set(_search_tokens(item[1]))),
         reverse=True,
     )[:max_rows]
     selected_rows = [row for _, row in ranked]
     return "\n".join([*headers, *selected_rows])
-
-
-def _public_safety_tokens(tokens: set[str]) -> set[str]:
-    return tokens | {
-        "auth",
-        "authentication",
-        "confidential",
-        "external",
-        "https",
-        "hybrid",
-        "security",
-        "sharing",
-    }
 
 
 def _single_document(path: Path, text: str, doc_type: str) -> list[dict]:

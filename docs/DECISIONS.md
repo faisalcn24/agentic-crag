@@ -2,9 +2,11 @@
 
 Decisions are recorded before measurements so later results are not tuned to a preferred narrative.
 
-## D-001: Extend the existing LlamaIndex pipeline
+## D-001: Keep LlamaIndex at the index boundary
 
-- **Decision:** Keep LlamaIndex for parsing, chunking, indexing, retrieval, and synthesis.
+- **Decision:** Keep LlamaIndex for chunking, persisted vector indexing, and
+  vector retrieval. Use the provider-neutral generation boundary in `rag.py` for
+  both direct and agent answers.
 - **Why:** The deployed application already has a working persisted-index boundary and `/retrieve` seam.
 - **Rejected:** A LangChain rewrite. It would add migration risk without improving the measured retrieval baseline.
 
@@ -43,7 +45,7 @@ Decisions are recorded before measurements so later results are not tuned to a p
   agent cases through loop safeguards instead of normal answers. A single
   corrective pass addresses incomplete retrieval without recreating that loop.
 - **Rejected:** Model-controlled repeated retrieval and an open-ended autonomous loop.
-- **Implementation guard:** Deterministic exact-evidence joins run before model
+- **Implementation guard:** Generic exact evidence matches run before model
   coverage checks. Invalid corrective terms are rejected and receive one bounded
   query derived from the full missing sub-question, never another planning call.
 - **Limitation:** Python cannot safely kill a running synchronous provider call. The request returns at the deadline, but a non-cooperative call already running in the worker relies on its configured HTTP timeout.
@@ -76,8 +78,8 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 - **Decision:** Request provider-native JSON schemas for conversational query
   planning, spreadsheet plans, multi-hop decomposition, evidence coverage, and
-  corrective queries. Validate every response; control failures either use an
-  existing deterministic fallback or terminate safely.
+  corrective queries. Validate every response; control failures use a small,
+  domain-neutral fallback where one is safe or terminate.
 - **Why:** Small local models were unreliable when JSON structure was requested
   only in prose.
 - **Rejected:** Trusting unrestricted JSON, adding repair loops, or introducing
@@ -129,3 +131,17 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Rejected:** Requiring a system Tesseract installation, sending images to a
   hosted vision model, adding a second search service, or rebuilding every
   existing index solely to enable keyword retrieval.
+
+## D-015: Keep evaluation knowledge out of production logic
+
+- **Decision:** Production retrieval and answering must remain corpus-agnostic.
+  Exact identifiers, versions, rows, and quotes are handled by generic parsing and
+  grounding rather than question-specific branches or expected-answer tables.
+- **Why:** Corpus-specific shortcuts inflated fixed-dataset results, expanded the
+  runtime, and did not transfer to new documents.
+- **Removed:** The duplicate LlamaIndex synthesis stack, hard-coded document facts,
+  fixed spreadsheet column semantics, and deterministic decompositions tied to the
+  bundled evaluation corpus.
+- **Guard:** Keep those scenarios as black-box regression tests. A historical
+  evaluation result may be retained, but it must be labeled historical after a
+  behavior-changing refactor until a new live review is completed.

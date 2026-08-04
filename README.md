@@ -2,75 +2,46 @@
 
 [![CI](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml/badge.svg)](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml)
 
-**A local-first RAG system that answers questions over documents with cited evidence.**
+Local-first document question answering with citations, OCR, hybrid search, and
+one bounded corrective retrieval pass.
 
-Agentic CRAG turns PDF, DOCX, XLSX, and image files into persistent searchable
-collections. It combines OCR, hybrid retrieval, spreadsheet analysis, and bounded
-multi-document reasoning behind a browser UI, REST API, and MCP server.
+Agentic CRAG turns PDF, DOCX, XLSX, and image files into persistent collections
+that can be queried through a browser, REST API, or MCP server. Parsing,
+embeddings, retrieval, and storage remain local. Generation uses local Ollama by
+default, with Groq available as an explicit hosted option.
 
-## What it demonstrates
+## What stands out
 
-- **Grounded answers:** factual claims include inspectable citations; unsupported
-  questions are declined.
-- **Hybrid retrieval:** BM25 and vector results are fused, then cross-encoder
-  reranked for semantic questions and exact identifiers.
-- **Bounded reasoning:** multi-hop questions are decomposed once, checked for
-  verbatim evidence, and receive at most one corrective retrieval per missing leg.
-- **Document intelligence:** local OCR handles images and scanned PDFs; validated
-  DuckDB operations handle spreadsheet questions.
-- **Local-first execution:** parsing, OCR, embeddings, retrieval, and storage stay
-  local. Ollama also keeps generation local; optional Groq sends only the question
-  and retrieved excerpts.
+- **Grounded answers:** unsupported claims are removed and missing answers abstain.
+- **Hybrid retrieval:** BM25 and vector results are fused and reranked, improving
+  both semantic search and exact-identifier lookup.
+- **Bounded correction:** multi-part questions are decomposed, checked against
+  exact source quotes, and receive at most one corrective retrieval per missing
+  part—never an open-ended agent loop.
+- **Document support:** local OCR handles images and scanned PDFs; validated
+  operations compiled to DuckDB handle spreadsheet analysis.
+- **Three interfaces:** a dependency-free web UI, FastAPI endpoints, and MCP tools
+  for Claude Code or another compatible host.
 
 **Stack:** Python 3.13, FastAPI, LlamaIndex, BM25, BGE embeddings/reranking,
 RapidOCR, DuckDB, Ollama, optional Groq, MCP, pytest, and Ruff.
 
-## Verified results
-
-The retained full-corpus review records:
-
-| Evaluation | Result |
-| --- | ---: |
-| Direct RAG | 60/60 |
-| Bounded agent RAG | 60/60 |
-| Adversarial cases | 20/20 |
-| Expected-source recall | 100% |
-| Spreadsheet / multi-hop subsets | 15/15 each |
-| Answer-not-present behavior | 10/10 |
-| Automated tests | 135 passed |
-| Quality integration suite | 24/24 with live checks enabled |
-
-Answers and citations were reviewed directly without a model judge. After the latest
-coverage-gate change, all 15 retained multi-hop answers preserved deterministic
-parity, and the four affected normal corpus cases reproduced their answers
-byte-for-byte in live runs.
-
-A controlled live forced-miss test hid required evidence from eight reviewed
-multi-document questions. The correction-disabled path completed 0/8; bounded
-correction completed 7/8 byte-for-byte and 8/8 under direct review, restoring all
-required citations without creating a retrieval loop.
-
-See the [evaluation methodology](docs/EVALUATION.md) and
-[reviewed output](evals/results/eval-20260803T202217Z.json). These measurements use
-the bundled, self-authored corpus; they do not establish general production accuracy.
-OCR tests cover generated printed-text scans, not arbitrary layouts or handwriting.
-
-## How it works
+## Architecture
 
 ```text
-Documents -> parse/OCR -> persistent collection
-                              |
-Question -> BM25 + vector search -> rerank -> exact/table handling -> cited answer
+documents -> parse / OCR -> chunk -> persistent vector index
                                       |
-                     multi-hop -> quote check -> one optional correction
+question -> BM25 + vector -> fusion -> rerank -> grounded answer
                                       |
-                              answer or abstain
+                     multi-part -> quote coverage check
+                                      |
+                         one correction -> answer or abstain
 ```
 
 ## Run locally
 
-Requirements: Python 3.13 and [Ollama](https://ollama.com/) with
-`llama3.2:3b`.
+Install [Python 3.13](https://www.python.org/) and
+[Ollama](https://ollama.com/), then:
 
 ```powershell
 py -3.13 -m venv venv
@@ -82,38 +53,40 @@ ollama pull llama3.2:3b
 ```
 
 Open `http://localhost:8000`, create a collection, and upload files from
-`documents/`. On Linux or macOS, use `bash scripts/run_dev.sh`.
+`documents/`. API documentation is at `http://localhost:8000/docs`.
 
-Useful demo questions:
+Try:
 
 - `What does FR-006 require?`
 - `How much faster was tiny-smoke retrieval than large-policy-pack retrieval?`
 - `Contrast the recommended local Windows and EC2 storage locations.`
-- `What was the company payroll for 2026?` - demonstrates abstention
+- `What was the company payroll for 2026?` (demonstrates abstention)
 
-Supporting evidence is expandable below each answer. API documentation is available
-at `http://localhost:8000/docs`.
+Run the MCP server with `python -m functions.mcp_server`. It exposes collection
+discovery, corpus search, and grounded answering tools over stdio.
 
-## Interfaces and boundaries
+## Verification
 
-- Browser chat and collection management
-- REST endpoints for direct RAG, bounded agent RAG, retrieval, metrics, and collections
-- MCP tools for corpus search, grounded answers, and collection discovery
-- PDF, DOCX, XLSX, PNG, JPEG, TIFF, BMP, and WebP input
-
-This is a trusted local demo, not a public multi-tenant service. Add authentication,
-HTTPS, rate limiting, and a retention policy before exposing private documents or an
-untrusted public endpoint.
-
-## Verify
-
-```bash
+```powershell
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ruff check functions tests evals scripts
-python evals/run_evals.py --mode compare
+python -m compileall -q functions tests evals scripts
 ```
 
-More detail: [architecture decisions](docs/DECISIONS.md),
-[evaluation record](docs/EVALUATION.md), and
-[AWS deployment guide](docs/DEPLOYMENT.md).
+The current generalized runtime passes **101 default tests plus two opt-in live
+model/reranker checks**. A retained 60-question corpus review is available
+as [historical evaluation evidence](docs/EVALUATION.md), but it predates the
+removal of corpus-specific shortcuts and is not presented as a current
+general-data accuracy score.
+
+## Boundaries
+
+This is a trusted local demo, not a public multi-tenant service. Add
+authentication, HTTPS, rate limiting, and a retention policy before accepting
+private uploads through a public endpoint. OCR is tested on printed text, not
+handwriting or arbitrary layouts.
+
+See [engineering decisions](docs/DECISIONS.md),
+[evaluation methodology](docs/EVALUATION.md), and
+[deployment notes](docs/DEPLOYMENT.md).

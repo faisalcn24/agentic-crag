@@ -73,6 +73,14 @@ def extract_grounded_sentence(
     question: str, sources: list[dict[str, Any]]
 ) -> str | None:
     """Return a directly matching evidence sentence for a simple factual question."""
+    best = find_grounded_evidence(question, sources)
+    return f"{best.text} [{best.filename}]" if best else None
+
+
+def find_grounded_evidence(
+    question: str, sources: list[dict[str, Any]]
+) -> EvidenceSentence | None:
+    """Return the best exact evidence sentence for a simple factual question."""
     question_terms = _ordered_terms(question)
     if len(question_terms) < 2:
         return None
@@ -88,7 +96,7 @@ def extract_grounded_sentence(
     if not matches:
         return None
 
-    best = min(
+    return min(
         matches,
         key=lambda item: (
             -_term_coverage(question_terms, item.terms),
@@ -96,7 +104,6 @@ def extract_grounded_sentence(
             len(item.text),
         ),
     )
-    return f"{best.text} [{best.filename}]"
 
 
 def grounding_candidates(
@@ -167,14 +174,11 @@ def _claims(answer: str) -> list[str]:
     lines = [
         re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
         for line in without_citations.splitlines()
-        if line.strip()
-        and not re.match(r"^\s*sources?\s*:", line, re.IGNORECASE)
+        if line.strip() and not re.match(r"^\s*sources?\s*:", line, re.IGNORECASE)
     ]
     claims = []
     for line in lines:
-        for value in re.split(
-            r"(?<=[.!?])\s+|;\s+|,\s+(?=(?:while|whereas)\b)", line
-        ):
+        for value in re.split(r"(?<=[.!?])\s+|;\s+|,\s+(?=(?:while|whereas)\b)", line):
             cleaned = re.sub(r"^(?:while|whereas)\s+", "", value).strip(" ,")
             if cleaned:
                 claims.append(cleaned)
@@ -192,18 +196,11 @@ def _evidence_sentences(
         filename = source.get("filename", "unknown")
         source_text = _without_source_header(source)
         sentences = []
-        for sentence in re.split(
-            r"(?<=[.!?])\s+|\n+", source_text
-        ):
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", source_text):
             cleaned = sentence.strip()
             if (
                 not cleaned
                 or cleaned.endswith("?")
-                or re.match(
-                    r"^(?:expected answer|question(?:\s+[a-z0-9]+)?)\s*:",
-                    cleaned,
-                    re.IGNORECASE,
-                )
                 or cleaned.casefold().startswith(("document filename:", "sheet:"))
             ):
                 continue
@@ -293,14 +290,11 @@ def _anchors(text: str) -> set[str]:
         for value in values:
             lowered = value.casefold()
             normalized = _normalize(lowered)
-            if (
-                lowered not in _STOP_WORDS
-                and (
-                    any(character.isdigit() for character in value)
-                    or any(character in value for character in "_/.")
-                    or value[:1].isupper()
-                    or normalized in {"never", "no", "not", "without"}
-                )
+            if lowered not in _STOP_WORDS and (
+                any(character.isdigit() for character in value)
+                or any(character in value for character in "_/.")
+                or value[:1].isupper()
+                or normalized in {"never", "no", "not", "without"}
             ):
                 anchors.add(normalized)
     return anchors
@@ -341,7 +335,9 @@ def _question_focus_terms(question: str) -> set[str]:
     return {first_non_anchor}
 
 
-def _term_coverage(required: list[str] | set[str], available: set[str] | frozenset[str]) -> float:
+def _term_coverage(
+    required: list[str] | set[str], available: set[str] | frozenset[str]
+) -> float:
     unique_required = set(required)
     if not unique_required:
         return 0.0
@@ -369,9 +365,7 @@ def _contains_answer_content(
 
 
 def _anchor_order_matches(claim: str, evidence: str) -> bool:
-    claim_anchors = [
-        term for term in _ordered_terms(claim) if term in _anchors(claim)
-    ]
+    claim_anchors = [term for term in _ordered_terms(claim) if term in _anchors(claim)]
     shared = [term for term in claim_anchors if _contains_all(_terms(evidence), {term})]
     if len(shared) < 2:
         return True

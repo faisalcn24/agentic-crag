@@ -146,7 +146,9 @@ def test_scanned_pdf_pages_fall_back_to_ocr(tmp_path: Path, monkeypatch):
     path = tmp_path / "scan.pdf"
     path.write_bytes(b"pdf bytes")
     pages = [
-        SimpleNamespace(extract_text=lambda: "Embedded text is already long enough to keep."),
+        SimpleNamespace(
+            extract_text=lambda: "Embedded text is already long enough to keep."
+        ),
         SimpleNamespace(extract_text=lambda: ""),
     ]
     monkeypatch.setattr(rag, "PdfReader", lambda _path: SimpleNamespace(pages=pages))
@@ -220,27 +222,6 @@ def test_embedding_setup_reuses_one_model(monkeypatch):
     assert settings.embed_model is first
 
 
-def test_llm_setup_reuses_matching_provider_configuration(monkeypatch):
-    created = []
-    settings = SimpleNamespace(llm=None)
-
-    monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama")
-    monkeypatch.setattr(rag, "_llms", {})
-    monkeypatch.setattr(rag, "Settings", settings)
-    monkeypatch.setattr(
-        rag,
-        "_build_ollama_llm",
-        lambda: created.append(object()) or created[-1],
-    )
-
-    rag.setup_llm()
-    first = settings.llm
-    rag.setup_llm()
-
-    assert created == [first]
-    assert settings.llm is first
-
-
 def test_load_index_reuses_cached_instance(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     index_dir = rag.get_indexes_dir() / "demo"
@@ -266,53 +247,29 @@ def test_load_index_reuses_cached_instance(tmp_path: Path, monkeypatch):
     assert loaded == [str(index_dir)]
 
 
-def test_answer_entrypoint_configures_llm_it_uses(monkeypatch):
-    configured = []
-
-    class Response:
-        source_nodes = []
-
-        def __str__(self):
-            return "The answer is not present in the provided documents."
-
-    class Engine:
-        @staticmethod
-        def query(_message):
-            return Response()
-
-    class QueryEngineFactory:
-        @staticmethod
-        def from_args(**_kwargs):
-            return Engine()
-
-    monkeypatch.setattr(rag, "setup_llm", lambda: configured.append(True))
-    monkeypatch.setattr(rag, "RetrieverQueryEngine", QueryEngineFactory)
+def test_answer_entrypoint_uses_shared_retrieval_and_model_call(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        rag,
+        "retrieve_sources",
+        lambda _index, query, top_k: calls.append(("retrieve", query, top_k)) or [],
+    )
+    monkeypatch.setattr(
+        rag,
+        "call_model",
+        lambda _prompt, *, node, timeout: (
+            calls.append(("complete", node, timeout))
+            or ("The answer is not present in the provided documents.", 1)
+        ),
+    )
 
     result = rag.ask_index_with_sources(object(), "Unknown fact?")
 
-    assert configured == [True]
+    assert calls == [
+        ("retrieve", "Unknown fact?", rag.RERANK_TOP_N),
+        ("complete", "synthesis", 120.0),
+    ]
     assert result["answer"] == "The answer is not present in the provided documents."
-
-
-def test_missing_citations_are_appended_from_returned_sources():
-    answer = rag.ensure_source_citations(
-        "The public port is 80.",
-        [
-            {"filename": "runbook.docx"},
-            {"filename": "runbook.docx"},
-            {"filename": "requirements.docx"},
-        ],
-    )
-
-    assert answer == "The public port is 80.\n\nSource: [runbook.docx]"
-
-
-def test_abstention_does_not_gain_irrelevant_citations():
-    answer = "The answer is not present in the provided documents."
-
-    assert (
-        rag.ensure_source_citations(answer, [{"filename": "runbook.docx"}]) == answer
-    )
 
 
 def test_spreadsheet_lookup_matches_requested_row_and_column():
@@ -345,9 +302,12 @@ def test_spreadsheet_lookup_ignores_notes_when_matching_a_row():
         ),
     }
 
-    assert rag.answer_spreadsheet_lookup(
-        "What was the Q1 Groq API budget and actual spend?", [source]
-    ) == "Budget: $40; Actual spend: $28 [budget.xlsx-Quarterly Budget]"
+    assert (
+        rag.answer_spreadsheet_lookup(
+            "What was the Q1 Groq API budget and actual spend?", [source]
+        )
+        == "Budget: $40; Actual: $28 [budget.xlsx-Quarterly Budget]"
+    )
 
 
 def test_spreadsheet_lookup_uses_requested_latency_field():
@@ -362,240 +322,11 @@ def test_spreadsheet_lookup_uses_requested_latency_field():
 
     assert (
         rag.answer_spreadsheet_lookup(
-            "What retrieval latency was recorded for the spreadsheet-heavy benchmark?",
+            "What retrieval time was recorded for the spreadsheet-heavy benchmark?",
             [source],
         )
         == "295 ms [benchmarks.xlsx-Indexing Benchmarks]"
     )
-
-
-def test_direct_fact_extraction_returns_exact_identifier_sentence():
-    source = {
-        "filename": "requirements.docx",
-        "type": "docx",
-        "text": (
-            "FR-005: The system returns source snippets. "
-            "FR-006: The system exposes a retrieval-only endpoint."
-        ),
-    }
-
-    assert rag.answer_direct_fact("What does FR-006 require?", [source]) == (
-        "FR-006: The system exposes a retrieval-only endpoint. [requirements.docx]"
-    )
-
-
-def test_direct_fact_extraction_preserves_explicit_feature_negation():
-    sources = [
-        {
-            "filename": "evaluation.docx",
-            "type": "docx",
-            "text": "Question E: Is authentication included in the current release?",
-        },
-        {
-            "filename": "requirements.docx",
-            "type": "docx",
-            "text": "The current release does not include authentication.",
-        },
-    ]
-
-    assert rag.answer_direct_fact("Is authentication included?", sources) == (
-        "The current release does not include authentication. [requirements.docx]"
-    )
-
-
-def test_direct_fact_extraction_handles_does_include_question():
-    source = {
-        "filename": "requirements.docx",
-        "type": "docx",
-        "text": "The current release does not include authentication.",
-    }
-
-    assert rag.answer_direct_fact(
-        "Does the current release include authentication?", [source]
-    ) == "The current release does not include authentication. [requirements.docx]"
-
-
-def test_direct_fact_extraction_corrects_unsupported_which_premise():
-    source = {
-        "filename": "requirements.docx",
-        "type": "docx",
-        "text": (
-            "The current release does not store collections in S3 or a managed "
-            "vector database. Local disk is used for simplicity."
-        ),
-    }
-
-    answer = rag.answer_direct_fact(
-        "Which managed vector database is used in production?", [source]
-    )
-
-    assert answer == (
-        "The current release does not store collections in S3 or a managed vector "
-        "database. [requirements.docx]"
-    )
-
-
-def test_direct_fact_extraction_keeps_attached_negative_condition():
-    source = {
-        "filename": "requirements.docx",
-        "type": "docx",
-        "text": (
-            "The current release does not process scanned PDFs with OCR. "
-            "Text must be extractable from the uploaded files."
-        ),
-    }
-
-    answer = rag.answer_direct_fact(
-        "Can the current release process scanned PDFs with OCR?", [source]
-    )
-
-    assert answer == (
-        "The current release does not process scanned PDFs with OCR. "
-        "Text must be extractable from the uploaded files. [requirements.docx]"
-    )
-
-
-def test_direct_fact_extraction_answers_rebuild_timing():
-    source = {
-        "filename": "releases.docx",
-        "type": "docx",
-        "text": (
-            "Compatibility Notes. Collections built before a chunking or embedding "
-            "change should be rebuilt to ensure retrieval uses the current settings."
-        ),
-    }
-
-    assert rag.answer_direct_fact(
-        "When should existing collections be rebuilt?", [source]
-    ) == (
-        "Collections built before a chunking or embedding change should be rebuilt "
-        "to ensure retrieval uses the current settings. [releases.docx]"
-    )
-
-
-def test_direct_fact_extraction_returns_local_windows_storage_path():
-    source = {
-        "filename": "releases.docx",
-        "type": "docx",
-        "text": (
-            "Version 2.3 added a default local storage recommendation of "
-            ".agentic_crag_data for Windows development."
-        ),
-    }
-
-    assert rag.answer_direct_fact(
-        "What local Windows storage path was recommended in version 2.3?", [source]
-    ) == (
-        "Version 2.3 added a default local storage recommendation of .agentic_crag_data "
-        "for Windows development. [releases.docx]"
-    )
-
-
-def test_direct_fact_extraction_answers_named_services():
-    source = {
-        "filename": "runbook.docx",
-        "type": "docx",
-        "text": "The intended service names are agentic-crag-api and agentic-crag-ui.",
-    }
-
-    assert rag.answer_direct_fact(
-        "Which systemd services run the application?", [source]
-    ) == "The intended service names are agentic-crag-api and agentic-crag-ui. [runbook.docx]"
-
-
-def test_direct_fact_extraction_summarizes_deployment_ports():
-    source = {
-        "filename": "runbook.docx",
-        "type": "docx",
-        "text": (
-            "FastAPI listens on 127.0.0.1:8000 and Streamlit listens on "
-            "127.0.0.1:8501. Nginx listens publicly on port 80."
-        ),
-    }
-
-    answer = rag.answer_direct_fact("Summarize the deployment ports.", [source])
-
-    assert "127.0.0.1:8000" in answer
-    assert "127.0.0.1:8501" in answer
-    assert "port 80" in answer
-    assert "[runbook.docx]" in answer
-
-
-def test_spreadsheet_lookup_corrects_false_budget_exceed_premise():
-    source = {
-        "filename": "budget.xlsx-Quarterly Budget",
-        "type": "xlsx",
-        "text": (
-            "Quarter: Q3 | Category: Groq API | Budget_USD: 75 | Actual_USD: 0"
-        ),
-    }
-
-    answer = rag.answer_spreadsheet_lookup(
-        "How much did Q3 Groq spending exceed its $75 budget?", [source]
-    )
-
-    assert answer == (
-        "It did not exceed the budget; actual spend was $0 against a $75 budget. "
-        "[budget.xlsx-Quarterly Budget]"
-    )
-
-
-def test_direct_fact_extraction_corrects_negative_feature_premise():
-    source = {
-        "filename": "requirements.docx",
-        "type": "docx",
-        "text": (
-            "The current release does not store collections in S3 or a managed vector "
-            "database. Local disk is used for simplicity and cost control. "
-            "The current release does not process scanned PDFs with OCR. Text must be "
-            "extractable from the uploaded files."
-        ),
-    }
-
-    s3_answer = rag.answer_direct_fact(
-        "Which S3 bucket stores the production indexes?", [source]
-    )
-    ocr_answer = rag.answer_direct_fact(
-        "What accuracy did the OCR pipeline achieve?", [source]
-    )
-
-    assert "does not store collections in S3" in s3_answer
-    assert "Local disk is used" in s3_answer
-    assert "does not process scanned PDFs with OCR" in ocr_answer
-    assert "Text must be extractable" in ocr_answer
-
-
-def test_negative_feature_extraction_does_not_hijack_unrelated_question():
-    source = {
-        "filename": "risks.xlsx-Risks",
-        "type": "xlsx",
-        "text": "Risk_ID: R-008 | Risk: No authentication | Status: Open",
-    }
-
-    assert rag.answer_direct_fact("List the open risks.", [source]) is None
-
-
-def test_public_deployment_risks_prioritize_auth_and_external_provider():
-    source = {
-        "filename": "risks.xlsx-Risk Register",
-        "type": "xlsx",
-        "text": (
-            "Risk_ID: R-003 | Risk: Wrong public IP in SSH security group | "
-            "Mitigation: Update inbound SSH source\n"
-            "Risk_ID: R-007 | Risk: User uploads confidential files to hybrid demo | "
-            "Mitigation: Warn that excerpts are sent to external LLM provider\n"
-            "Risk_ID: R-008 | Risk: No authentication on public demo | "
-            "Mitigation: Add auth before long-lived sharing"
-        ),
-    }
-
-    answer = rag.answer_public_deployment_risks(
-        "What two reasons make a long-lived public deployment unsafe?", [source]
-    )
-
-    assert "R-007" in answer
-    assert "R-008" in answer
-    assert "R-003" not in answer
 
 
 def test_formatted_spreadsheet_source_preserves_rows_and_full_sheet():

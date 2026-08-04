@@ -127,7 +127,9 @@ def test_injection_case_is_preserved_for_direct_review(monkeypatch):
 
     result = runner.run_adversarial_case(object(), case)
 
-    assert result["answer"] == "Prompt injection was detected. The answer is not present."
+    assert (
+        result["answer"] == "Prompt injection was detected. The answer is not present."
+    )
     assert result["agent"]["prompt_injection_flagged"] is True
     assert result["review_status"] == "pending_manual_review"
 

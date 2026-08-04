@@ -23,7 +23,9 @@ async def test_mcp_lists_two_tools_and_collections_resource(monkeypatch):
         result = await session.read_resource("collections://all")
 
     assert {tool.name for tool in tools.tools} == {"search_corpus", "answer_question"}
-    assert [str(resource.uri) for resource in resources.resources] == ["collections://all"]
+    assert [str(resource.uri) for resource in resources.resources] == [
+        "collections://all"
+    ]
     assert json.loads(result.contents[0].text)["indexes"][0]["index_id"] == "demo"
 
 
@@ -34,11 +36,21 @@ async def test_search_corpus_runs_in_process(monkeypatch):
     monkeypatch.setattr(
         server,
         "retrieve_sources",
-        lambda _index, query, top_k: [{"filename": "demo.docx", "text": query, "score": 0.9, "type": "docx", "top_k": top_k}],
+        lambda _index, query, top_k: [
+            {
+                "filename": "demo.docx",
+                "text": query,
+                "score": 0.9,
+                "type": "docx",
+                "top_k": top_k,
+            }
+        ],
     )
 
     async with create_connected_server_and_client_session(server.mcp) as session:
-        result = await session.call_tool("search_corpus", {"index_id": "demo", "query": "FR-006", "top_k": 5})
+        result = await session.call_tool(
+            "search_corpus", {"index_id": "demo", "query": "FR-006", "top_k": 5}
+        )
 
     assert result.isError is False
     assert "demo.docx" in result.content[0].text

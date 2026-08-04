@@ -28,7 +28,7 @@ def test_root_serves_graphical_chat_page():
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "AGENTIC CRAG" in response.text
-    assert 'fetch(`/${elements.mode.value}`' in response.text
+    assert "fetch(`/${elements.mode.value}`" in response.text
     assert "SOURCE_PREVIEW_LENGTH = 300" in response.text
     assert 'toggle.textContent = "Show more"' in response.text
     assert 'toggle.textContent = expanded ? "Show more" : "Show less"' in response.text
@@ -36,15 +36,23 @@ def test_root_serves_graphical_chat_page():
 
 
 def test_upload_allowlist_accepts_documents_and_images():
-    validate_upload_metadata([
-        upload("one.pdf", "application/pdf"),
-        upload("two.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-        upload("three.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-        upload("four.png", "image/png"),
-        upload("five.jpg", "image/jpeg"),
-        upload("six.tiff", "image/tiff"),
-        upload("seven.webp", "image/webp"),
-    ])
+    validate_upload_metadata(
+        [
+            upload("one.pdf", "application/pdf"),
+            upload(
+                "two.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            upload(
+                "three.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            upload("four.png", "image/png"),
+            upload("five.jpg", "image/jpeg"),
+            upload("six.tiff", "image/tiff"),
+            upload("seven.webp", "image/webp"),
+        ]
+    )
 
 
 def test_upload_allowlist_rejects_legacy_xls():

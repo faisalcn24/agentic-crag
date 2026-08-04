@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .agent import run_agent
-
 from .rag import (
     ask_index_with_sources,
     build_index,
@@ -30,7 +29,9 @@ from .telemetry import log_query_result, summarize_events
 CHAT_PAGE = Path(__file__).with_name("static") / "chat.html"
 ALLOWED_UPLOAD_TYPES = {
     ".pdf": {"application/pdf"},
-    ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+    ".docx": {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    },
     ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
     ".png": {"image/png"},
     ".jpg": {"image/jpeg"},
@@ -73,11 +74,17 @@ def health() -> dict:
 
 @app.get("/indexes")
 def list_indexes() -> dict:
-    return {"indexes": [{"index_id": key, **value} for key, value in load_registry().items()]}
+    return {
+        "indexes": [
+            {"index_id": key, **value} for key, value in load_registry().items()
+        ]
+    }
 
 
 @app.post("/indexes")
-def create_index(index_id: str | None = Form(default=None), files: list[UploadFile] = File(...)) -> dict:
+def create_index(
+    index_id: str | None = Form(default=None), files: list[UploadFile] = File(...)
+) -> dict:
     if not files:
         raise HTTPException(status_code=400, detail="At least one document is required")
 
@@ -89,14 +96,21 @@ def create_index(index_id: str | None = Form(default=None), files: list[UploadFi
         _save_uploads(files, staging_dir)
         raw_docs, warnings = load_documents(staging_dir)
         if not raw_docs:
-            raise HTTPException(status_code=400, detail={"message": "No readable documents found", "warnings": warnings})
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "No readable documents found", "warnings": warnings},
+            )
         build_index(raw_docs, safe_index_id)
         upload_dir = _promote_upload_dir(staging_dir, safe_index_id)
         metadata = update_registry(safe_index_id, upload_dir, raw_docs)
     finally:
         if staging_dir.exists():
             shutil.rmtree(staging_dir, ignore_errors=True)
-    return {"index_id": safe_index_id, "documents": metadata["documents"], "warnings": warnings}
+    return {
+        "index_id": safe_index_id,
+        "documents": metadata["documents"],
+        "warnings": warnings,
+    }
 
 
 @app.delete("/indexes/{index_id}")
@@ -118,8 +132,12 @@ def chat(request: ChatRequest) -> dict:
     try:
         started = perf_counter()
         index = load_index(safe_index_id)
-        result = ask_index_with_sources(index, request.message, [turn.model_dump() for turn in request.history])
-        log_query_result(mode="single", iterations=1, latency_ms=(perf_counter() - started) * 1000)
+        result = ask_index_with_sources(
+            index, request.message, [turn.model_dump() for turn in request.history]
+        )
+        log_query_result(
+            mode="single", iterations=1, latency_ms=(perf_counter() - started) * 1000
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
     return result
@@ -132,7 +150,9 @@ def agent(request: ChatRequest) -> dict:
     safe_index_id = _existing_index_id(request.index_id)
     try:
         index = load_index(safe_index_id)
-        return run_agent(index, request.message, [turn.model_dump() for turn in request.history])
+        return run_agent(
+            index, request.message, [turn.model_dump() for turn in request.history]
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Agent failed: {exc}") from exc
 
@@ -187,7 +207,10 @@ def _save_uploads(files: list[UploadFile], upload_dir: Path) -> None:
             while chunk := upload.file.read(1024 * 1024):
                 total += len(chunk)
                 if total > limit:
-                    raise HTTPException(status_code=413, detail="Combined uploads exceed the upload size limit")
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Combined uploads exceed the upload size limit",
+                    )
                 out_file.write(chunk)
 
 
@@ -204,15 +227,26 @@ def validate_upload_metadata(files: list[UploadFile]) -> None:
     for upload in files:
         suffix = Path(upload.filename or "").suffix.lower()
         if suffix not in ALLOWED_UPLOAD_TYPES:
-            raise HTTPException(status_code=415, detail=f"Unsupported file extension: {suffix or 'none'}")
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file extension: {suffix or 'none'}",
+            )
         if upload.content_type not in ALLOWED_UPLOAD_TYPES[suffix]:
-            raise HTTPException(status_code=415, detail=f"MIME type {upload.content_type or 'missing'} is not allowed for {suffix}")
+            raise HTTPException(
+                status_code=415,
+                detail=f"MIME type {upload.content_type or 'missing'} is not allowed for {suffix}",
+            )
         if upload.size is not None:
             if upload.size > limit:
-                raise HTTPException(status_code=413, detail=f"{upload.filename} exceeds the upload size limit")
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"{upload.filename} exceeds the upload size limit",
+                )
             declared_total += upload.size
     if declared_total > limit:
-        raise HTTPException(status_code=413, detail="Combined uploads exceed the upload size limit")
+        raise HTTPException(
+            status_code=413, detail="Combined uploads exceed the upload size limit"
+        )
 
 
 def max_upload_bytes() -> int:

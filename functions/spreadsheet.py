@@ -79,10 +79,8 @@ def is_spreadsheet_analysis_question(
         return bool(question_tokens & column_tokens)
     patterns = (
         r"\b(?:highest|lowest|slowest|fastest|maximum|minimum|max|min)\b",
-        r"\b(?:total|sum|average|mean|difference|faster|slower|compare|comparison)\b",
+        r"\b(?:total|sum|average|mean|difference|faster|slower|compare|comparison|exceed)\b",
         r"\b(?:sort|sorted|order|group)\b",
-        r"\bwhich\b.+\bstatus\b",
-        r"\bopen risks?\b",
     )
     return any(re.search(pattern, lowered) for pattern in patterns)
 
@@ -101,7 +99,7 @@ def answer_spreadsheet_lookup(
     question: str, sources: list[dict[str, Any]]
 ) -> str | None:
     """Answer an unambiguous lookup from one spreadsheet row."""
-    fields = _requested_lookup_fields(question)
+    fields = _requested_lookup_fields(question, spreadsheet_columns(sources))
     if not fields:
         return None
     question_tokens = _lookup_tokens(question)
@@ -110,12 +108,14 @@ def answer_spreadsheet_lookup(
         for row in _source_rows(source):
             if not all(field in row for field in fields):
                 continue
-            searchable_values = " ".join(
-                value for key, value in row.items() if key != "Notes"
-            )
+            searchable_values = " ".join(row.values())
+            matching_tokens = question_tokens & _lookup_tokens(searchable_values)
             candidates.append(
                 (
-                    len(question_tokens & _lookup_tokens(searchable_values)),
+                    sum(
+                        3 if any(character.isdigit() for character in token) else 1
+                        for token in matching_tokens
+                    ),
                     source.get("filename", "unknown"),
                     row,
                 )
@@ -128,33 +128,17 @@ def answer_spreadsheet_lookup(
     ):
         return None
     _, filename, row = candidates[0]
-    if "exceed" in question.casefold() and {
-        "Budget_USD",
-        "Actual_USD",
-    } <= row.keys():
-        budget = _number(row["Budget_USD"])
-        actual = _number(row["Actual_USD"])
-        if budget is not None and actual is not None and actual <= budget:
-            return (
-                f"It did not exceed the budget; actual spend was "
-                f"{_format_value('Actual_USD', row['Actual_USD'])} against a "
-                f"{_format_value('Budget_USD', row['Budget_USD'])} budget. "
-                f"[{filename}]"
-            )
     values = [_format_value(field, row[field]) for field in fields]
     if len(values) == 1:
         return f"{values[0]} [{filename}]"
-    labels = {"Budget_USD": "Budget", "Actual_USD": "Actual spend"}
     parts = [
-        f"{labels.get(field, field.replace('_', ' '))}: {value}"
+        f"{_column_label(field).title()}: {value}"
         for field, value in zip(fields, values, strict=True)
     ]
     return f"{'; '.join(parts)} [{filename}]"
 
 
-def spreadsheet_plan_prompt(
-    question: str, sources: list[dict[str, Any]]
-) -> str:
+def spreadsheet_plan_prompt(question: str, sources: list[dict[str, Any]]) -> str:
     columns = spreadsheet_columns(sources)
     samples = []
     for source in sources:
@@ -249,7 +233,11 @@ def validate_spreadsheet_plan(
         )
 
     operation = normalized["operation"]
-    if operation in {"sum", "average", "minimum", "maximum", "difference", "comparison"} and not normalized["value_column"]:
+    if (
+        operation
+        in {"sum", "average", "minimum", "maximum", "difference", "comparison"}
+        and not normalized["value_column"]
+    ):
         return None
     if operation == "sort" and not normalized["sort_column"]:
         return None
@@ -257,7 +245,11 @@ def validate_spreadsheet_plan(
         not normalized["group_by"] or normalized["aggregate"] == "none"
     ):
         return None
-    if operation == "group" and normalized["aggregate"] != "count" and not normalized["value_column"]:
+    if (
+        operation == "group"
+        and normalized["aggregate"] != "count"
+        and not normalized["value_column"]
+    ):
         return None
     return normalized
 
@@ -299,109 +291,7 @@ def execute_spreadsheet_plan(
     return result
 
 
-def fallback_spreadsheet_plan(
-    question: str, sources: list[dict[str, Any]]
-) -> dict[str, Any] | None:
-    columns = spreadsheet_columns(sources)
-    if not columns:
-        return None
-    lowered = question.casefold()
-    value_column = _question_value_column(lowered, columns)
-    label_column, mentioned_values = _mentioned_row_values(lowered, sources)
-    if value_column and not mentioned_values:
-        label_column = _label_for_column(value_column, sources)
-    result: dict[str, Any] = {
-        "operation": "select",
-        "value_column": value_column or "",
-        "select_columns": [],
-        "filters": [],
-        "sort_column": "",
-        "sort_direction": "asc",
-        "group_by": "",
-        "aggregate": "none",
-        "limit": 100,
-    }
-
-    if re.search(r"\b(?:difference|faster|slower)\b", lowered):
-        if not value_column or not label_column or len(mentioned_values) < 2:
-            return None
-        result.update(
-            operation="difference",
-            select_columns=[label_column, value_column],
-            filters=[
-                {
-                    "column": label_column,
-                    "operator": "in",
-                    "value": "",
-                    "values": mentioned_values[:2],
-                }
-            ],
-        )
-    elif re.search(r"\b(?:compare|comparison|versus|vs\.?|contrast)\b", lowered):
-        if not value_column or not label_column or len(mentioned_values) < 2:
-            return None
-        result.update(
-            operation="comparison",
-            select_columns=[label_column, value_column],
-            filters=[
-                {
-                    "column": label_column,
-                    "operator": "in",
-                    "value": "",
-                    "values": mentioned_values[:2],
-                }
-            ],
-        )
-    elif re.search(r"\b(?:highest|slowest|maximum|max)\b", lowered):
-        if not value_column:
-            return None
-        result.update(
-            operation="maximum",
-            select_columns=[column for column in (label_column, value_column) if column],
-        )
-    elif re.search(r"\b(?:lowest|fastest|minimum|min)\b", lowered):
-        if not value_column:
-            return None
-        result.update(
-            operation="minimum",
-            select_columns=[column for column in (label_column, value_column) if column],
-        )
-    elif re.search(r"\b(?:average|mean)\b", lowered):
-        result["operation"] = "average"
-    elif re.search(r"\b(?:total|sum)\b", lowered):
-        result["operation"] = "sum"
-    elif re.search(r"\b(?:count|how many)\b", lowered):
-        result["operation"] = "count"
-    elif re.search(r"\bwhich\b.+\bstatus\b|\bopen risks?\b", lowered):
-        status_column = _resolve_column("status", columns)
-        if status_column is None:
-            return None
-        status_value = (
-            "Open"
-            if "open risk" in lowered
-            else _mentioned_value_for_column(lowered, status_column, sources)
-        )
-        if status_value is None:
-            return None
-        label_column = _label_for_column(status_column, sources)
-        result.update(
-            operation="filter",
-            select_columns=[label_column] if label_column else [],
-            filters=[
-                {
-                    "column": status_column,
-                    "operator": "eq",
-                    "value": status_value,
-                    "values": [],
-                }
-            ],
-        )
-    else:
-        return None
-    return validate_spreadsheet_plan(result, sources)
-
-
-def format_spreadsheet_answer(question: str, result: dict[str, Any]) -> str:
+def format_spreadsheet_answer(result: dict[str, Any]) -> str:
     plan = result["plan"]
     operation = plan["operation"]
     source = result["source"]
@@ -410,9 +300,11 @@ def format_spreadsheet_answer(question: str, result: dict[str, Any]) -> str:
     if operation in {"minimum", "maximum"} and rows:
         row = rows[0]
         label_column = _label_column(list(row), exclude={value_column})
-        label = row.get(label_column, "The matching row") if label_column else "The matching row"
-        if label_column == "Risk_ID" and row.get("Risk"):
-            label = f"{label} ({row['Risk']})"
+        label = (
+            row.get(label_column, "The matching row")
+            if label_column
+            else "The matching row"
+        )
         adjective = "highest" if operation == "maximum" else "lowest"
         return (
             f"{label} has the {adjective} {_column_label(value_column)}: "
@@ -428,7 +320,11 @@ def format_spreadsheet_answer(question: str, result: dict[str, Any]) -> str:
             f"{second_label} is {_format_value(value_column, rows[1][value_column])}. [{source}]"
         )
     if operation in {"sum", "average", "count"}:
-        label = "row count" if operation == "count" else f"{operation} {_column_label(value_column)}"
+        label = (
+            "row count"
+            if operation == "count"
+            else f"{operation} {_column_label(value_column)}"
+        )
         column = value_column if operation != "count" else ""
         return f"The {label} is {_format_value(column, result['value'])}. [{source}]"
     if operation in {"filter", "select", "sort", "comparison", "group"} and rows:
@@ -436,19 +332,26 @@ def format_spreadsheet_answer(question: str, result: dict[str, Any]) -> str:
             values = [str(next(iter(row.values()))) for row in rows]
             return f"{_join_values(values)}. [{source}]"
         rendered = "; ".join(
-            ", ".join(f"{_column_label(key)}: {_format_value(key, value)}" for key, value in row.items())
+            ", ".join(
+                f"{_column_label(key)}: {_format_value(key, value)}"
+                for key, value in row.items()
+            )
             for row in rows
         )
         return f"{rendered}. [{source}]"
     return "The answer is not present in the provided documents."
 
 
-def _execute(connection, plan: dict[str, Any], columns: list[str]) -> dict[str, Any] | None:
+def _execute(
+    connection, plan: dict[str, Any], columns: list[str]
+) -> dict[str, Any] | None:
     where_sql, params = _where_clause(plan["filters"])
     operation = plan["operation"]
     limit = plan["limit"]
     if operation == "count":
-        value = connection.execute(f"SELECT COUNT(*) FROM data{where_sql}", params).fetchone()[0]
+        value = connection.execute(
+            f"SELECT COUNT(*) FROM data{where_sql}", params
+        ).fetchone()[0]
         return {"columns": ["count"], "rows": [], "value": value}
     if operation in {"sum", "average"}:
         function = "SUM" if operation == "sum" else "AVG"
@@ -479,7 +382,9 @@ def _execute(connection, plan: dict[str, Any], columns: list[str]) -> dict[str, 
                 "minimum": "MIN",
                 "maximum": "MAX",
             }
-            expression = f"{functions[aggregate]}({_numeric_expression(plan['value_column'])})"
+            expression = (
+                f"{functions[aggregate]}({_numeric_expression(plan['value_column'])})"
+            )
         alias = f"{aggregate}_{plan['value_column']}".rstrip("_")
         sql = (
             f"SELECT {_identifier(group_by)}, {expression} AS {_identifier(alias)} "
@@ -489,7 +394,10 @@ def _execute(connection, plan: dict[str, Any], columns: list[str]) -> dict[str, 
         return _row_result(connection, sql, params)
 
     selected = plan["select_columns"] or columns
-    if operation in {"difference", "comparison"} and plan["value_column"] not in selected:
+    if (
+        operation in {"difference", "comparison"}
+        and plan["value_column"] not in selected
+    ):
         selected.append(plan["value_column"])
     select_sql = ", ".join(_identifier(column) for column in selected)
     order_sql = ""
@@ -526,7 +434,9 @@ def _where_clause(filters: list[dict[str, Any]]) -> tuple[str, list[Any]]:
             params.append(f"%{item['value'].casefold()}%")
         elif operator in {"gt", "gte", "lt", "lte"}:
             symbols = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
-            clauses.append(f"{_numeric_expression(item['column'])} {symbols[operator]} ?")
+            clauses.append(
+                f"{_numeric_expression(item['column'])} {symbols[operator]} ?"
+            )
             numeric = _number(item["value"])
             if numeric is None:
                 return " WHERE FALSE", []
@@ -589,28 +499,14 @@ def parse_spreadsheet_row(line: str) -> dict[str, str]:
     return {key.strip(): value.strip() for key, value in cells}
 
 
-def _requested_lookup_fields(question: str) -> list[str]:
-    lowered = question.casefold()
-    fields = []
-    if "budget" in lowered:
-        fields.append("Budget_USD")
-    if any(term in lowered for term in ("actual", "spent", "spend", "spending")):
-        fields.append("Actual_USD")
-    if "retrieval latency" in lowered or "retrieval time" in lowered:
-        fields.append("Retrieval_Time_ms")
-    if "index time" in lowered or (
-        "indexing benchmark" in lowered and "how long" in lowered
-    ):
-        fields.append("Index_Time_Seconds")
-    if "probability" in lowered:
-        fields.append("Probability")
-    if "what caused" in lowered or "root cause" in lowered:
-        fields.append("Root_Cause")
-    if "what date" in lowered or "on what date" in lowered:
-        fields.append("Date")
-    if "what fix" in lowered or "fix resolved" in lowered:
-        fields.append("Fix")
-    return fields
+def _requested_lookup_fields(question: str, columns: list[str]) -> list[str]:
+    question_tokens = _lookup_tokens(question)
+    return [
+        column
+        for column in columns
+        if (label_tokens := _lookup_tokens(_column_label(column)))
+        and label_tokens <= question_tokens
+    ]
 
 
 def _lookup_tokens(text: str) -> set[str]:
@@ -649,83 +545,13 @@ def _resolve_column(requested: str, columns: list[str]) -> str | None:
     return normalized[0] if len(normalized) == 1 else None
 
 
-def _question_value_column(question: str, columns: list[str]) -> str | None:
-    aliases = (
-        (("retrieval time", "retrieval latency", "retrieval"), "Retrieval_Time_ms"),
-        (("index time", "indexing time"), "Index_Time_Seconds"),
-        (("probability",), "Probability"),
-        (("actual spend", "actually spent", "actual"), "Actual_USD"),
-        (("budget",), "Budget_USD"),
-        (("score",), "Score"),
-        (("cost",), "Cost"),
-    )
-    for phrases, candidate in aliases:
-        if any(phrase in question for phrase in phrases):
-            resolved = _resolve_column(candidate, columns)
-            if resolved:
-                return resolved
-    mentioned = [column for column in columns if _column_label(column) in question]
-    return mentioned[0] if len(mentioned) == 1 else None
-
-
-def _mentioned_row_values(
-    question: str, sources: list[dict[str, Any]]
-) -> tuple[str | None, list[str]]:
-    columns = spreadsheet_columns(sources)
-    preferred = [
-        "Risk_ID",
-        "Incident_ID",
-        "Document_Set",
-        "Name",
-        "Quarter",
-        "Category",
-    ]
-    ordered = [column for column in preferred if column in columns] + [
-        column for column in columns if column not in preferred
-    ]
-    best_column = None
-    best_values: list[str] = []
-    for column in ordered:
-        values = []
-        for source in sources:
-            for row in _source_rows(source):
-                value = row.get(column, "")
-                if value and not _is_numeric(value) and value.casefold() in question:
-                    if value not in values:
-                        values.append(value)
-        if len(values) > len(best_values):
-            best_column, best_values = column, values
-    if best_column is None:
-        best_column = _label_column(columns)
-    return best_column, best_values
-
-
-def _mentioned_value_for_column(
-    question: str, column: str, sources: list[dict[str, Any]]
-) -> str | None:
-    for source in sources:
-        for row in _source_rows(source):
-            value = row.get(column, "")
-            if value and value.casefold() in question:
-                return value
-    return None
-
-
-def _label_for_column(
-    value_column: str, sources: list[dict[str, Any]]
-) -> str | None:
-    for source in sources:
-        rows = _source_rows(source)
-        if rows and value_column in rows[0]:
-            return _label_column(list(rows[0]), exclude={value_column})
-    return None
-
-
 def _label_column(columns: list[str], exclude: set[str] | None = None) -> str | None:
     exclude = exclude or set()
-    preferred = ("Risk_ID", "Incident_ID", "Document_Set", "Name", "Quarter", "Category")
-    for column in preferred:
-        if column in columns and column not in exclude:
+    for column in columns:
+        key = re.sub(r"[^a-z0-9]", "", column.casefold())
+        if column not in exclude and (
+            key.endswith("id") or key in {"name", "label", "title"}
+        ):
             return column
     return next((column for column in columns if column not in exclude), None)
 
@@ -748,22 +574,22 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _is_numeric(value: Any) -> bool:
-    return _number(value) is not None
-
-
 def _column_label(column: str) -> str:
-    return column.replace("_USD", "").replace("_ms", "").replace("_Seconds", "").replace("_", " ").casefold()
+    parts = column.replace("_", " ").split()
+    if parts and parts[-1].casefold() in {"usd", "ms", "seconds"}:
+        parts.pop()
+    return " ".join(parts).casefold()
 
 
 def _format_value(column: str, value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         value = int(value)
-    if column.endswith("_USD"):
+    unit = column.rsplit("_", 1)[-1].casefold()
+    if unit == "usd":
         return f"${value}"
-    if column.endswith("_ms"):
+    if unit == "ms":
         return f"{value} ms"
-    if column.endswith("_Seconds"):
+    if unit == "seconds":
         return f"{value} seconds"
     return str(value)
 
