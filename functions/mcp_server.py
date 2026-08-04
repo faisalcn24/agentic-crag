@@ -44,7 +44,7 @@ def _collection(index_id: str):
 
 
 def main() -> None:
-    transport = os.getenv("INSIGHT_MCP_TRANSPORT", "stdio")
+    transport = os.getenv("AGENTIC_CRAG_MCP_TRANSPORT", "stdio")
     mcp.run(transport=transport)
 
 

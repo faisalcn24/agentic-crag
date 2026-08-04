@@ -11,7 +11,7 @@ from functions import rag
 from functions.agent import run_agent
 
 
-RUN_LIVE_QUALITY_TESTS = os.getenv("INSIGHT_RUN_LIVE_QUALITY_TESTS") == "1"
+RUN_LIVE_QUALITY_TESTS = os.getenv("AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS") == "1"
 ABSTENTION = "The answer is not present in the provided documents."
 
 
@@ -404,7 +404,7 @@ def test_question_and_expected_answer_text_cannot_become_evidence():
 
 @pytest.mark.skipif(
     not RUN_LIVE_QUALITY_TESTS,
-    reason="set INSIGHT_RUN_LIVE_QUALITY_TESTS=1 to load the real reranker",
+    reason="set AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1 to load the real reranker",
 )
 def test_real_reranker_promotes_semantically_matching_passage():
     candidates = [
@@ -413,7 +413,7 @@ def test_real_reranker_promotes_semantically_matching_passage():
         ),
         NodeWithScore(
             node=TextNode(
-                text="The EC2 storage path is /opt/insight-ai/data."
+                text="The EC2 storage path is /opt/agentic-crag/data."
             ),
             score=0.01,
         ),
@@ -427,20 +427,20 @@ def test_real_reranker_promotes_semantically_matching_passage():
     )
 
     assert ranked[0].node.text == (
-        "The EC2 storage path is /opt/insight-ai/data."
+        "The EC2 storage path is /opt/agentic-crag/data."
     )
     assert ranked[0].score > max(item.score for item in ranked[1:])
 
 
 @pytest.mark.skipif(
     not RUN_LIVE_QUALITY_TESTS,
-    reason="set INSIGHT_RUN_LIVE_QUALITY_TESTS=1 and run Ollama",
+    reason="set AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1 and run Ollama",
 )
 def test_live_rag_stays_grounded_with_entity_distractors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setenv("INSIGHT_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_MODEL", "llama3.2:3b")
     monkeypatch.setenv("OLLAMA_PLANNER_MODEL", "llama3.2:3b")
 

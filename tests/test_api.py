@@ -55,7 +55,7 @@ def test_upload_allowlist_rejects_legacy_xls():
 
 
 def test_upload_limit_rejects_oversized_file(monkeypatch):
-    monkeypatch.setenv("INSIGHT_MAX_UPLOAD_MB", "0.000001")
+    monkeypatch.setenv("AGENTIC_CRAG_MAX_UPLOAD_MB", "0.000001")
 
     with pytest.raises(HTTPException) as exc_info:
         validate_upload_metadata([upload("large.pdf", "application/pdf", size=10)])

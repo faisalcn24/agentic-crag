@@ -8,7 +8,7 @@ from functions.telemetry import (
 
 
 def test_telemetry_records_only_latency_and_iterations(tmp_path, monkeypatch):
-    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
 
     log_query_result(mode="agent", iterations=2, latency_ms=45.6789)
 

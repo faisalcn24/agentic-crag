@@ -35,7 +35,7 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
     for provider in ("ollama", "groq"):
-        monkeypatch.setenv("INSIGHT_LLM_PROVIDER", provider)
+        monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", provider)
         text, _ = rag.call_model("plan this", node="planner")
         assert text == '{"query":"standalone"}'
 
@@ -79,7 +79,7 @@ def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
 
     expected = []
     for provider in ("ollama", "groq"):
-        monkeypatch.setenv("INSIGHT_LLM_PROVIDER", provider)
+        monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", provider)
         for node, schema in rag.STRUCTURED_OUTPUT_SCHEMAS.items():
             rag.call_model("control", node=node)
             expected.append((node, schema))
@@ -87,7 +87,7 @@ def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
     assert len(requests) == len(expected)
     for request, (node, schema) in zip(requests, expected, strict=True):
         value = request["response_format"]["json_schema"]
-        assert value["name"] == f"insight_{node}"
+        assert value["name"] == f"agentic_crag_{node}"
         assert value["strict"] is True
         assert value["schema"] == schema
 
@@ -95,7 +95,7 @@ def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
 def test_load_docx(tmp_path: Path):
     path = tmp_path / "sample.docx"
     doc = Document()
-    doc.add_paragraph("INSIGHT AI project overview")
+    doc.add_paragraph("Agentic CRAG project overview")
     doc.save(path)
 
     docs = load_document_file(path)
@@ -103,7 +103,7 @@ def test_load_docx(tmp_path: Path):
     assert docs == [
         {
             "filename": "sample.docx",
-            "text": "Document filename: sample.docx\n\nINSIGHT AI project overview",
+            "text": "Document filename: sample.docx\n\nAgentic CRAG project overview",
             "type": "docx",
         }
     ]
@@ -183,7 +183,7 @@ def test_unsupported_file_is_reported(tmp_path: Path):
 
 
 def test_remove_index_removes_registry_entry_and_index_dir(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     index_dir = rag.get_indexes_dir() / "demo"
     index_dir.mkdir(parents=True)
     registry_file = tmp_path / "registry.json"
@@ -224,7 +224,7 @@ def test_llm_setup_reuses_matching_provider_configuration(monkeypatch):
     created = []
     settings = SimpleNamespace(llm=None)
 
-    monkeypatch.setenv("INSIGHT_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama")
     monkeypatch.setattr(rag, "_llms", {})
     monkeypatch.setattr(rag, "Settings", settings)
     monkeypatch.setattr(
@@ -242,7 +242,7 @@ def test_llm_setup_reuses_matching_provider_configuration(monkeypatch):
 
 
 def test_load_index_reuses_cached_instance(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     index_dir = rag.get_indexes_dir() / "demo"
     index_dir.mkdir(parents=True)
     loaded = []
@@ -479,14 +479,14 @@ def test_direct_fact_extraction_returns_local_windows_storage_path():
         "type": "docx",
         "text": (
             "Version 2.3 added a default local storage recommendation of "
-            ".insight_data for Windows development."
+            ".agentic_crag_data for Windows development."
         ),
     }
 
     assert rag.answer_direct_fact(
         "What local Windows storage path was recommended in version 2.3?", [source]
     ) == (
-        "Version 2.3 added a default local storage recommendation of .insight_data "
+        "Version 2.3 added a default local storage recommendation of .agentic_crag_data "
         "for Windows development. [releases.docx]"
     )
 
@@ -495,12 +495,12 @@ def test_direct_fact_extraction_answers_named_services():
     source = {
         "filename": "runbook.docx",
         "type": "docx",
-        "text": "The intended service names are insight-api and insight-ui.",
+        "text": "The intended service names are agentic-crag-api and agentic-crag-ui.",
     }
 
     assert rag.answer_direct_fact(
         "Which systemd services run the application?", [source]
-    ) == "The intended service names are insight-api and insight-ui. [runbook.docx]"
+    ) == "The intended service names are agentic-crag-api and agentic-crag-ui. [runbook.docx]"
 
 
 def test_direct_fact_extraction_summarizes_deployment_ports():

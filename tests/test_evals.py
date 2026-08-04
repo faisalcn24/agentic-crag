@@ -39,7 +39,7 @@ def test_adversarial_dataset_has_twenty_cases():
 
 
 def test_single_case_uses_current_telemetry_api(tmp_path, monkeypatch):
-    monkeypatch.setenv("INSIGHT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     monkeypatch.setattr(
         runner,
         "ask_index_with_sources",

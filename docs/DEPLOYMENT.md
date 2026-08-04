@@ -11,10 +11,10 @@ enabled, questions and retrieved excerpts leave the instance.
 public :80 -> Nginx -> FastAPI 127.0.0.1:8000
                          |
                          +-> Ollama 127.0.0.1:11434
-                         +-> /opt/insight-ai/data
+                         +-> /opt/agentic-crag/data
 ```
 
-The deployment uses `insight-api.service`, Nginx, and Ollama. It does not install a web UI or automatic retention service.
+The deployment uses `agentic-crag-api.service`, Nginx, and Ollama. It does not install a web UI or automatic retention service.
 
 ## Before deploying
 
@@ -29,41 +29,41 @@ The deployment uses `insight-api.service`, Nginx, and Ollama. It does not instal
 ```bash
 sudo apt update
 sudo apt install -y git
-sudo mkdir -p /opt/insight-ai
-sudo chown -R ubuntu:ubuntu /opt/insight-ai
-git clone https://github.com/faisalcn24/insight-ai-2.git /opt/insight-ai/app
-cd /opt/insight-ai/app
+sudo mkdir -p /opt/agentic-crag
+sudo chown -R ubuntu:ubuntu /opt/agentic-crag
+git clone https://github.com/faisalcn24/agentic-crag.git /opt/agentic-crag/app
+cd /opt/agentic-crag/app
 bash deploy/setup_ec2.sh
 ```
 
 The script installs Python, Nginx, Git, Ollama, and `llama3.2:3b`; creates the virtual environment; installs dependencies; and enables the API and Nginx services.
 
-Review `/opt/insight-ai/.env` after setup:
+Review `/opt/agentic-crag/.env` after setup:
 
 ```env
-INSIGHT_LLM_PROVIDER=ollama
+AGENTIC_CRAG_LLM_PROVIDER=ollama
 OLLAMA_MODEL=llama3.2:3b
 OLLAMA_PLANNER_MODEL=llama3.2:3b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_CONTEXT_WINDOW=8192
-INSIGHT_STORAGE_DIR=/opt/insight-ai/data
-INSIGHT_MAX_UPLOAD_MB=10
+AGENTIC_CRAG_STORAGE_DIR=/opt/agentic-crag/data
+AGENTIC_CRAG_MAX_UPLOAD_MB=10
 ```
 
-To use Groq, change `INSIGHT_LLM_PROVIDER` to `groq`, set `GROQ_API_KEY`, and restart `insight-api`.
+To use Groq, change `AGENTIC_CRAG_LLM_PROVIDER` to `groq`, set `GROQ_API_KEY`, and restart `agentic-crag-api`.
 
 ## Manual service installation
 
-After cloning the repository, creating `venv`, installing `requirements.txt`, and creating `/opt/insight-ai/.env`:
+After cloning the repository, creating `venv`, installing `requirements.txt`, and creating `/opt/agentic-crag/.env`:
 
 ```bash
-sudo cp deploy/insight-api.service /etc/systemd/system/
-sudo cp deploy/nginx-insight-ai.conf /etc/nginx/sites-available/insight-ai
-sudo ln -sf /etc/nginx/sites-available/insight-ai /etc/nginx/sites-enabled/insight-ai
+sudo cp deploy/agentic-crag-api.service /etc/systemd/system/
+sudo cp deploy/nginx-agentic-crag.conf /etc/nginx/sites-available/agentic-crag
+sudo ln -sf /etc/nginx/sites-available/agentic-crag /etc/nginx/sites-enabled/agentic-crag
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl daemon-reload
-sudo systemctl enable --now ollama insight-api nginx
+sudo systemctl enable --now ollama agentic-crag-api nginx
 ```
 
 ## Smoke test
@@ -79,14 +79,12 @@ Open `http://<ec2-public-ip>/` for the graphical chat page or
 ## Operations
 
 ```bash
-sudo systemctl status ollama insight-api nginx
-sudo journalctl -u insight-api -f
-sudo systemctl restart insight-api
-cd /opt/insight-ai/app
+sudo systemctl status ollama agentic-crag-api nginx
+sudo journalctl -u agentic-crag-api -f
+sudo systemctl restart agentic-crag-api
+cd /opt/agentic-crag/app
 bash deploy/update_app.sh
 ```
-
-The update script also disables and removes legacy `insight-ui` and `insight-retention` unit files from older deployments.
 
 ## API endpoints
 

@@ -78,12 +78,12 @@ def answer_bounded_multihop_fact(
         if local and hosted:
             return f"{local[1]} [{local[0]}] {hosted[1]} [{hosted[0]}]"
     if "contrast" in lowered and "windows" in lowered and "ec2" in lowered:
-        windows = _source_with(sources, {".insight_data", "windows"})
-        ec2 = _source_with(sources, {"/opt/insight-ai/data", "ec2"})
+        windows = _source_with(sources, {".agentic_crag_data", "windows"})
+        ec2 = _source_with(sources, {"/opt/agentic-crag/data", "ec2"})
         if windows and ec2:
             return (
-                f"Windows development uses .insight_data [{windows[0]}], while EC2 "
-                f"uses /opt/insight-ai/data [{ec2[0]}]."
+                f"Windows development uses .agentic_crag_data [{windows[0]}], while EC2 "
+                f"uses /opt/agentic-crag/data [{ec2[0]}]."
             )
     if "retrieval metric" in lowered:
         requirement = _sentence_with(sources, {"fr", "006", "retrieval", "endpoint"})

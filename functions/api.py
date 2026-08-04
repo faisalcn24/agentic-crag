@@ -216,4 +216,4 @@ def validate_upload_metadata(files: list[UploadFile]) -> None:
 
 
 def max_upload_bytes() -> int:
-    return int(float(os.getenv("INSIGHT_MAX_UPLOAD_MB", "10")) * 1024 * 1024)
+    return int(float(os.getenv("AGENTIC_CRAG_MAX_UPLOAD_MB", "10")) * 1024 * 1024)

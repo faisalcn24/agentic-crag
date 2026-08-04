@@ -1,0 +1,14 @@
+[Unit]
+Description=Agentic CRAG FastAPI backend
+After=network.target ollama.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/agentic-crag/app
+EnvironmentFile=/opt/agentic-crag/.env
+ExecStart=/opt/agentic-crag/app/venv/bin/uvicorn functions.api:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

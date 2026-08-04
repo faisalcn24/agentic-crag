@@ -12,7 +12,9 @@ _write_lock = threading.Lock()
 
 
 def telemetry_file() -> Path:
-    storage = Path(os.getenv("INSIGHT_STORAGE_DIR", Path.home() / "INSIGHT_AI_storage"))
+    storage = Path(
+        os.getenv("AGENTIC_CRAG_STORAGE_DIR", Path.home() / ".agentic_crag_data")
+    )
     return storage.expanduser() / "metrics" / "queries.jsonl"
 
 

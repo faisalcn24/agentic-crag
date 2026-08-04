@@ -252,12 +252,12 @@ def test_bounded_answer_contrasts_windows_and_ec2_storage():
         {
             "filename": "releases.docx",
             "type": "docx",
-            "text": "Windows development uses .insight_data.",
+            "text": "Windows development uses .agentic_crag_data.",
         },
         {
             "filename": "runbook.docx",
             "type": "docx",
-            "text": "The canonical EC2 storage path is /opt/insight-ai/data.",
+            "text": "The canonical EC2 storage path is /opt/agentic-crag/data.",
         },
     ]
 
@@ -265,8 +265,8 @@ def test_bounded_answer_contrasts_windows_and_ec2_storage():
         "Contrast the recommended local Windows and EC2 storage locations.", sources
     )
 
-    assert ".insight_data [releases.docx]" in answer
-    assert "/opt/insight-ai/data [runbook.docx]" in answer
+    assert ".agentic_crag_data [releases.docx]" in answer
+    assert "/opt/agentic-crag/data [runbook.docx]" in answer
 
 
 def test_bounded_answer_preserves_each_supported_port_and_exposure_leg():

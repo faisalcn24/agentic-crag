@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_ROOT="${APP_ROOT:-/opt/insight-ai}"
+APP_ROOT="${APP_ROOT:-/opt/agentic-crag}"
 APP_DIR="${APP_DIR:-$APP_ROOT/app}"
 DATA_DIR="${DATA_DIR:-$APP_ROOT/data}"
 ENV_FILE="${ENV_FILE:-$APP_ROOT/.env}"
-REPO_URL="${REPO_URL:-https://github.com/faisalcn24/insight-ai-2.git}"
+REPO_URL="${REPO_URL:-https://github.com/faisalcn24/agentic-crag.git}"
 APP_USER="${APP_USER:-ubuntu}"
 SWAP_FILE="${SWAP_FILE:-/swapfile}"
 SWAP_SIZE="${SWAP_SIZE:-2G}"
@@ -63,7 +63,7 @@ python3 -m venv venv
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Creating $ENV_FILE from .env.example..."
   cp .env.example "$ENV_FILE"
-  sed -i "s|^INSIGHT_STORAGE_DIR=.*|INSIGHT_STORAGE_DIR=$DATA_DIR|" "$ENV_FILE"
+  sed -i "s|^AGENTIC_CRAG_STORAGE_DIR=.*|AGENTIC_CRAG_STORAGE_DIR=$DATA_DIR|" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   echo "Edit $ENV_FILE if you want to change the default local Ollama configuration."
 else
@@ -71,17 +71,15 @@ else
 fi
 
 echo "Installing systemd and Nginx config..."
-sudo cp deploy/insight-api.service /etc/systemd/system/
-sudo cp deploy/nginx-insight-ai.conf /etc/nginx/sites-available/insight-ai
-sudo ln -sf /etc/nginx/sites-available/insight-ai /etc/nginx/sites-enabled/insight-ai
+sudo cp deploy/agentic-crag-api.service /etc/systemd/system/
+sudo cp deploy/nginx-agentic-crag.conf /etc/nginx/sites-available/agentic-crag
+sudo ln -sf /etc/nginx/sites-available/agentic-crag /etc/nginx/sites-enabled/agentic-crag
 sudo rm -f /etc/nginx/sites-enabled/default
 
 sudo nginx -t
-sudo systemctl disable --now insight-ui.service insight-retention.timer 2>/dev/null || true
-sudo rm -f /etc/systemd/system/insight-ui.service /etc/systemd/system/insight-retention.service /etc/systemd/system/insight-retention.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now insight-api nginx
-sudo systemctl restart insight-api
+sudo systemctl enable --now agentic-crag-api nginx
+sudo systemctl restart agentic-crag-api
 sudo systemctl reload nginx
 
 echo "Setup complete."
@@ -89,4 +87,4 @@ echo "Check health with:"
 echo "  curl http://127.0.0.1:8000/health"
 echo "  curl http://127.0.0.1/health"
 echo "If chat fails, confirm Ollama is running and the model settings in $ENV_FILE are correct, then run:"
-echo "  sudo systemctl restart insight-api"
+echo "  sudo systemctl restart agentic-crag-api"

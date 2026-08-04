@@ -37,7 +37,7 @@ DEFAULT_INDEX_ID = "upgrade-eval-corpus"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate fixed Insight AI answers for direct review"
+        description="Generate fixed Agentic CRAG answers for direct review"
     )
     parser.add_argument(
         "--mode", choices=("single", "agent", "compare"), default="compare"
@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.environ.setdefault("INSIGHT_LLM_PROVIDER", "ollama")
+    os.environ.setdefault("AGENTIC_CRAG_LLM_PROVIDER", "ollama")
     os.environ.setdefault("OLLAMA_MODEL", "llama3.2:3b")
     os.environ.setdefault("OLLAMA_PLANNER_MODEL", "llama3.2:3b")
     index = ensure_eval_index(args.index_id)

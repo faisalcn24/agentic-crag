@@ -56,7 +56,7 @@ from .spreadsheet import (
 )
 
 
-DEFAULT_STORAGE_DIR = Path.home() / "INSIGHT_AI_storage"
+DEFAULT_STORAGE_DIR = Path.home() / ".agentic_crag_data"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_OLLAMA_MODEL = "llama3.2:3b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
@@ -245,7 +245,7 @@ load_dotenv_file()
 
 def get_storage_dir() -> Path:
     return (
-        Path(os.getenv("INSIGHT_STORAGE_DIR", str(DEFAULT_STORAGE_DIR)))
+        Path(os.getenv("AGENTIC_CRAG_STORAGE_DIR", str(DEFAULT_STORAGE_DIR)))
         .expanduser()
         .resolve()
     )
@@ -408,8 +408,8 @@ def setup_embeddings() -> None:
 
 
 def setup_llm() -> None:
-    """Configure the answer LLM from INSIGHT_LLM_PROVIDER."""
-    provider = os.getenv("INSIGHT_LLM_PROVIDER", "ollama").strip().lower()
+    """Configure the answer LLM from AGENTIC_CRAG_LLM_PROVIDER."""
+    provider = os.getenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama").strip().lower()
     if provider == "ollama":
         key = (
             provider,
@@ -425,7 +425,7 @@ def setup_llm() -> None:
         )
     else:
         raise RuntimeError(
-            f"Unknown INSIGHT_LLM_PROVIDER '{provider}' (expected 'groq' or 'ollama')"
+            f"Unknown AGENTIC_CRAG_LLM_PROVIDER '{provider}' (expected 'groq' or 'ollama')"
         )
     with _runtime_lock:
         if key not in _llms:
@@ -460,7 +460,7 @@ def call_model(
     prompt: str, *, node: str, timeout: float = 30.0, model: str | None = None
 ) -> tuple[str, int]:
     """Call the configured provider directly for bounded agent nodes."""
-    provider = os.getenv("INSIGHT_LLM_PROVIDER", "ollama").strip().lower()
+    provider = os.getenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama").strip().lower()
     if provider == "ollama":
         selected_model = model or os.getenv(
             "OLLAMA_PLANNER_MODEL" if node != "synthesis" else "OLLAMA_MODEL",
@@ -487,7 +487,7 @@ def call_model(
             max_retries=0,
         )
     else:
-        raise RuntimeError(f"Unknown INSIGHT_LLM_PROVIDER '{provider}'")
+        raise RuntimeError(f"Unknown AGENTIC_CRAG_LLM_PROVIDER '{provider}'")
 
     request: dict[str, Any] = {
         "model": selected_model,
@@ -506,7 +506,7 @@ def call_model(
         request["response_format"] = {
             "type": "json_schema",
             "json_schema": {
-                "name": f"insight_{node}",
+                "name": f"agentic_crag_{node}",
                 "strict": True,
                 "schema": schema,
             },
@@ -640,7 +640,7 @@ def answer_direct_fact(question: str, sources: list[dict[str, Any]]) -> str | No
         candidates = _matching_sentences(
             sources,
             lambda sentence: (
-                ".insight_data" in sentence
+                ".agentic_crag_data" in sentence
                 and "windows" in sentence.casefold()
                 and _is_declarative_fact(sentence)
             ),
@@ -748,7 +748,11 @@ def answer_direct_fact(question: str, sources: list[dict[str, Any]]) -> str | No
             sources,
             lambda sentence: (
                 "service" in sentence.casefold()
-                and len(re.findall(r"\binsight-[a-z0-9-]+\b", sentence, re.IGNORECASE))
+                and len(
+                    re.findall(
+                        r"\bagentic-crag-[a-z0-9-]+\b", sentence, re.IGNORECASE
+                    )
+                )
                 >= 2
                 and _is_declarative_fact(sentence)
             ),

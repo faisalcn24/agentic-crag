@@ -1,6 +1,6 @@
 # Agentic CRAG
 
-[![CI](https://github.com/faisalcn24/insight-ai-2/actions/workflows/ci.yml/badge.svg)](https://github.com/faisalcn24/insight-ai-2/actions/workflows/ci.yml)
+[![CI](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml/badge.svg)](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml)
 
 **A local-first RAG system that answers questions over documents with cited evidence.**
 

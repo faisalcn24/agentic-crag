@@ -102,9 +102,9 @@ class AgentConfig:
     def from_env(cls) -> "AgentConfig":
         return cls(
             timeout_seconds=min(
-                max(float(os.getenv("INSIGHT_AGENT_TIMEOUT_SECONDS", "30")), 1.0), 30.0
+                max(float(os.getenv("AGENTIC_CRAG_AGENT_TIMEOUT_SECONDS", "30")), 1.0), 30.0
             ),
-            token_limit=int(os.getenv("INSIGHT_AGENT_TOKEN_LIMIT", "12000")),
+            token_limit=int(os.getenv("AGENTIC_CRAG_AGENT_TOKEN_LIMIT", "12000")),
         )
 
 
@@ -148,7 +148,7 @@ def run_agent(
         "confidence": "low",
         "injection_flagged": injection_flagged,
     }
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="insight-agent")
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agentic-crag-agent")
     future = executor.submit(_run_workflow, initial_state, config, runtime, progress)
     try:
         state = future.result(timeout=max(0.01, config.timeout_seconds - 0.05))
