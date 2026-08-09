@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 from weakref import WeakKeyDictionary
 
+# Normal application requests use models already present in the local cache.
+# Operators can explicitly set either flag to 0 while populating that cache.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 import openpyxl
 from docx import Document
 from llama_index.core import Document as LlamaDocument
@@ -29,8 +34,17 @@ from openai import OpenAI
 from pypdf import PdfReader
 
 from .grounding import (
+    ABSTENTION,
+    classify_answer_intent,
+    extract_collection_overview,
+    extract_source_overview,
     extract_grounded_sentence,
+    extract_structured_answer,
+    find_answer_supporting_passages,
+    ground_conversational_answer,
     ground_generated_answer,
+    is_collection_overview_question,
+    overview_covers_core_fields,
 )
 from .multihop import DECOMPOSITION_SCHEMA
 from .spreadsheet import (
@@ -69,8 +83,19 @@ MAX_SPREADSHEET_SOURCE_TEXT_CHARS = 6000
 STRUCTURED_OUTPUT_SCHEMAS = {
     "planner": {
         "type": "object",
-        "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 500}},
-        "required": ["query"],
+        "properties": {
+            "query": {"type": "string", "minLength": 1, "maxLength": 500},
+            "intent": {"type": "string", "enum": ["answer", "overview"]},
+        },
+        "required": ["query", "intent"],
+        "additionalProperties": False,
+    },
+    "overview": {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string", "minLength": 1, "maxLength": 1600}
+        },
+        "required": ["answer"],
         "additionalProperties": False,
     },
     "spreadsheet_plan": SPREADSHEET_PLAN_SCHEMA,
@@ -342,7 +367,11 @@ def call_model(
     provider = os.getenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama").strip().lower()
     if provider == "ollama":
         selected_model = model or os.getenv(
-            "OLLAMA_PLANNER_MODEL" if node != "synthesis" else "OLLAMA_MODEL",
+            (
+                "OLLAMA_MODEL"
+                if node in {"synthesis", "overview"}
+                else "OLLAMA_PLANNER_MODEL"
+            ),
             DEFAULT_OLLAMA_MODEL,
         )
         base_url = (
@@ -353,7 +382,11 @@ def call_model(
         )
     elif provider == "groq":
         selected_model = model or os.getenv(
-            "GROQ_PLANNER_MODEL" if node != "synthesis" else "GROQ_MODEL",
+            (
+                "GROQ_MODEL"
+                if node in {"synthesis", "overview"}
+                else "GROQ_PLANNER_MODEL"
+            ),
             DEFAULT_GROQ_MODEL,
         )
         api_key = os.getenv("GROQ_API_KEY")
@@ -411,51 +444,243 @@ _rerankers: dict[int, SentenceTransformerRerank] = {}
 
 def get_reranker(top_n: int = RERANK_TOP_N) -> SentenceTransformerRerank:
     """Load the cross-encoder re-ranker once and reuse it across requests."""
-    if top_n not in _rerankers:
-        _rerankers[top_n] = SentenceTransformerRerank(model=RERANKER_MODEL, top_n=top_n)
-    return _rerankers[top_n]
+    with _runtime_lock:
+        if top_n not in _rerankers:
+            _rerankers[top_n] = SentenceTransformerRerank(
+                model=RERANKER_MODEL, top_n=top_n
+            )
+        return _rerankers[top_n]
 
 
 def ask_index_with_sources(
     index, message: str, history: list[dict] | None = None
 ) -> dict[str, Any]:
-    query = _standalone_query(message, history or [])
-    sources = retrieve_sources(index, query, top_k=RERANK_TOP_N)
+    query, answer_intent = _conversation_plan(message, history or [])
+    sources = retrieve_sources(
+        index,
+        query,
+        top_k=(
+            max(RERANK_TOP_N, 10)
+            if is_collection_overview_question(message)
+            else RERANK_TOP_N
+        ),
+    )
+    if answer_intent == "overview":
+        sources = _distinct_filename_sources(sources, limit=6)
 
-    answer = _spreadsheet_answer(message, sources)
+    answer = (
+        extract_collection_overview(message, sources)
+        if answer_intent == "overview"
+        else None
+    )
+    if answer is None:
+        answer = _spreadsheet_answer(message, sources)
     if answer is None:
         answer = answer_spreadsheet_lookup(message, sources)
-    if answer is None:
+    if answer is None and answer_intent != "overview":
+        answer = extract_structured_answer(message, sources)
+    if answer is None and answer_intent != "overview":
         answer = extract_grounded_sentence(message, sources)
     if answer is None:
         generated, _ = call_model(
-            _answer_prompt(message, sources), node="synthesis", timeout=120.0
+            _answer_prompt(message, query, answer_intent, sources),
+            node="overview" if answer_intent == "overview" else "synthesis",
+            timeout=30.0,
         )
-        answer = ground_generated_answer(message, generated, sources)
-    return {"answer": answer, "sources": sources}
+        if answer_intent == "overview":
+            generated = parse_overview_answer(generated)
+        answer = (
+            ground_conversational_answer(message, generated, sources)
+            if answer_intent == "overview"
+            else ground_generated_answer(message, generated, sources)
+        )
+    if answer_intent == "overview" and (
+        answer == ABSTENTION or not overview_covers_core_fields(answer, sources)
+    ):
+        answer = extract_source_overview(sources) or ABSTENTION
+    return {
+        "answer": answer,
+        "sources": (
+            sources
+            if ABSTENTION in answer
+            else supporting_source_groups(answer, sources)
+        ),
+    }
 
 
-def _standalone_query(message: str, history: list[dict]) -> str:
+def supporting_source_groups(
+    answer: str,
+    sources: list[dict[str, Any]],
+    verified_evidence: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return cited evidence grouped by document, without retrieval diagnostics."""
+    sources_by_filename: dict[str, list[dict[str, Any]]] = {}
+    for source in sources:
+        filename = source.get("filename")
+        if filename:
+            sources_by_filename.setdefault(filename, []).append(source)
+
+    citation_order = sorted(
+        (
+            (answer.find(f"[{filename}]"), filename)
+            for filename in sources_by_filename
+            if f"[{filename}]" in answer
+        ),
+        key=lambda item: item[0],
+    )
+    if not citation_order:
+        return []
+
+    verified_by_filename: dict[str, list[str]] = {}
+    for record in verified_evidence or []:
+        evidence = record.get("verified_evidence", record)
+        filename = evidence.get("filename")
+        quote = evidence.get("quote")
+        if not filename or not isinstance(quote, str) or not quote.strip():
+            continue
+        candidates = sources_by_filename.get(filename, [])
+        if not any(quote in source.get("text", "") for source in candidates):
+            continue
+        quotes = verified_by_filename.setdefault(filename, [])
+        if quote not in quotes:
+            quotes.append(quote)
+
+    groups = []
+    for _position, filename in citation_order:
+        candidates = sources_by_filename[filename]
+        passages = verified_by_filename.get(filename)
+        if not passages:
+            passages = [
+                passage.text
+                for passage in find_answer_supporting_passages(
+                    answer,
+                    candidates,
+                    citation_filename=filename,
+                )
+            ]
+        if not passages and _is_metadata_overview_answer(answer):
+            best = max(
+                candidates,
+                key=lambda source: _answer_source_overlap(
+                    answer, source.get("text", "")
+                ),
+            )
+            text = best.get("text", "").strip()
+            passages = [text] if text else []
+        if not passages:
+            continue
+        groups.append(
+            {
+                "filename": filename,
+                "type": candidates[0].get("type", "unknown"),
+                "text": "\n\n".join(passages),
+                "passages": [{"text": passage} for passage in passages],
+            }
+        )
+    return groups
+
+
+def _is_metadata_overview_answer(answer: str) -> bool:
+    return answer.startswith(("These documents cover ", "This covers:\n"))
+
+
+def _answer_source_overlap(answer: str, source_text: str) -> int:
+    ignored = {
+        "about",
+        "after",
+        "also",
+        "and",
+        "are",
+        "but",
+        "for",
+        "from",
+        "has",
+        "have",
+        "into",
+        "not",
+        "should",
+        "that",
+        "the",
+        "then",
+        "this",
+        "was",
+        "were",
+        "what",
+        "which",
+        "while",
+        "with",
+    }
+
+    def terms(text: str) -> set[str]:
+        return {
+            token
+            for token in re.findall(r"[a-z0-9][a-z0-9._/-]*", text.casefold())
+            if token not in ignored
+        }
+
+    return len(terms(answer).intersection(terms(source_text)))
+
+
+def _distinct_filename_sources(
+    sources: list[dict[str, Any]], *, limit: int
+) -> list[dict[str, Any]]:
+    result = []
+    seen = set()
+    for source in sources:
+        filename = source.get("filename", "unknown")
+        if filename in seen:
+            continue
+        result.append(source)
+        seen.add(filename)
+        if len(result) == limit:
+            break
+    return result
+
+
+def _conversation_plan(message: str, history: list[dict]) -> tuple[str, str]:
+    fallback_intent = classify_answer_intent(message)
     if not history:
-        return message
-    conversation = "\n".join(
-        f"{turn.get('role', 'user')}: {turn.get('content', '')[:500]}"
-        for turn in history[-4:]
+        return message, fallback_intent
+
+    fallback_query = _fallback_conversation_query(message, history)
+    text, _ = call_model(
+        conversation_plan_prompt(message, history), node="planner", timeout=30.0
     )
-    prompt = (
-        "Rewrite the latest document question as one standalone retrieval query. "
-        "Use conversation context only to resolve references; do not add facts.\n"
-        f"Conversation:\n{conversation}\nQuestion: {message}"
-    )
-    text, _ = call_model(prompt, node="planner", timeout=30.0)
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if match:
         try:
-            query = json.loads(match.group(0)).get("query", "").strip()
+            plan = json.loads(match.group(0))
+            query = str(plan.get("query", "")).strip()
+            intent = str(plan.get("intent", "")).strip().casefold()
             if 1 <= len(query) <= 500:
-                return query
+                return query, intent if intent in {"answer", "overview"} else fallback_intent
         except (AttributeError, json.JSONDecodeError):
             pass
+    return fallback_query, fallback_intent
+
+
+def conversation_plan_prompt(message: str, history: list[dict]) -> str:
+    return (
+        "Plan the latest document question using the conversation only to resolve references. "
+        "Return JSON only with query and intent. The query must be a standalone retrieval query "
+        "and must not add facts. Use intent 'overview' when the user wants a general explanation "
+        "or summary of the referenced document or subject; otherwise use intent 'answer'.\n"
+        f"Conversation:\n{_conversation_history_text(history)}\nQuestion: {message}"
+    )
+
+
+def _conversation_history_text(history: list[dict]) -> str:
+    lines = []
+    for turn in history[-4:]:
+        line = f"{turn.get('role', 'user')}: {turn.get('content', '')[:500]}"
+        filenames = turn.get("source_filenames", [])
+        if filenames:
+            line += f"\nsource_filenames: {', '.join(filenames[:5])}"
+        lines.append(line)
+    return "\n".join(lines) or "(none)"
+
+
+def _fallback_conversation_query(message: str, history: list[dict]) -> str:
     last_user = next(
         (
             turn.get("content", "").strip()
@@ -486,15 +711,92 @@ def _spreadsheet_answer(question: str, sources: list[dict[str, Any]]) -> str | N
     return format_spreadsheet_answer(result) if result else None
 
 
-def _answer_prompt(question: str, sources: list[dict[str, Any]]) -> str:
+def _answer_prompt(
+    question: str,
+    resolved_context: str,
+    answer_intent: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    if answer_intent == "overview":
+        return overview_answer_prompt(question, resolved_context, sources)
     evidence = "\n\n".join(
         f"SOURCE: {source.get('filename', 'unknown')}\n{source.get('text', '')}"
         for source in sources
     )
     return (
-        f"{SYSTEM_PROMPT}\n\n<evidence>\n{evidence}\n</evidence>\n"
-        f"Question: {question}\nAnswer:"
+        f"{SYSTEM_PROMPT}\nAnswer the question directly and concisely. "
+        "Use the resolved context only to understand references; "
+        "it is not evidence.\n\n<evidence>\n"
+        f"{evidence}\n</evidence>\nQuestion: {question}\n"
+        f"Resolved context: {resolved_context}\nAnswer:"
     )
+
+
+def overview_answer_prompt(
+    question: str,
+    resolved_context: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    evidence = "\n\n".join(
+        f"SOURCE: {source.get('filename', 'unknown')}\n{source.get('text', '')}"
+        for source in sources
+    )
+    return (
+        "Explain what the source or collection is about using only the evidence below. Write "
+        "one natural paragraph for an everyday reader. When evidence comes from multiple "
+        "filenames, write one short sentence per filename (up to six sentences). Keep each "
+        "sentence within facts stated by that one SOURCE block; do not merge sources into a "
+        "single broad claim or present one file as the whole collection. State its subject or "
+        "most important theme in plain language. Stay close to the source terminology rather "
+        "than renaming its subject. Preserve identifiers, names, numbers, and technical terms "
+        "exactly. You may use simple connectors such as 'because' and 'resolved by', but do "
+        "not spell out acronyms, guess consequences, add background, or call something an "
+        "error unless the evidence does. Do not use bullets or headings. Cite each supporting "
+        "filename once, at the end. If the evidence does not state what the source is about, "
+        f"set answer to exactly: {ABSTENTION}\n"
+        'Return JSON only: {"answer":"your paragraph"}.\n'
+        "Use the resolved context only to understand references; it is not evidence.\n"
+        f"<evidence>\n{evidence}\n</evidence>\nQuestion: {question}\n"
+        f"Resolved context: {resolved_context}\nAnswer:"
+    )
+
+
+def referential_overview_prompt(
+    question: str,
+    previous_answer: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    evidence = "\n\n".join(
+        f"SOURCE: {source.get('filename', 'unknown')}\n{source.get('text', '')}"
+        for source in sources
+    )
+    sentence_rule = (
+        f"Write exactly {len(sources)} short sentences, one per SOURCE block in the order "
+        "shown. Keep each sentence within that source's facts. "
+        if len(sources) > 1
+        else "Write one short sentence using that SOURCE block's facts. "
+    )
+    return (
+        "Explain what the previous grounded answer is about in plain, natural language. "
+        f"{sentence_rule}Explain its subject and requested comparison directly; do not describe "
+        "the files as a collection, list document types, or add background. Preserve exact "
+        "identifiers, paths, and numbers. Use the retrieved evidence only to verify the "
+        "explanation. Cite each supporting filename once at the end. Return JSON only: "
+        '{"answer":"your explanation"}.\n'
+        f"<previous_answer>\n{previous_answer}\n</previous_answer>\n"
+        f"<evidence>\n{evidence}\n</evidence>\nQuestion: {question}\nAnswer:"
+    )
+
+
+def parse_overview_answer(text: str) -> str:
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return ABSTENTION
+    try:
+        answer = json.loads(match.group(0)).get("answer", "")
+    except (AttributeError, json.JSONDecodeError):
+        return ABSTENTION
+    return str(answer).strip() or ABSTENTION
 
 
 def retrieve_sources(

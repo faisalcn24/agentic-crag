@@ -30,7 +30,11 @@ _MULTI_HOP_CUES = (
         r"\b(?:change|difference|progression|relationship)\b.+\b(?:between|from|across)\b",
         re.IGNORECASE,
     ),
-    re.compile(r",\s*and\s+(?:what|how|why|which)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:first|second|another|other)\s+(?:document|source)\b.+"
+        r"\b(?:first|second|another|other)\s+(?:document|source)\b",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\bhow do\b.+\band\b.+\b(?:differ|relate|support|work)\b", re.IGNORECASE
     ),
@@ -48,10 +52,39 @@ def decomposition_prompt(question: str) -> str:
     return (
         "Break this document question into two to four independent retrieval questions. "
         "Each subquestion must ask for one required fact or calculation. Preserve exact "
-        "identifiers, names, versions, paths, and numbers. Do not answer the question or "
-        "add background. Return the schema-constrained object only.\n"
+        "identifiers, names, versions, paths, numbers, and the scope of each clause. Do not "
+        "carry a qualifier such as a platform, version, or location from one clause into a "
+        "different clause. Keep directly related public/private or before/after facts together "
+        "when one passage is likely to state them together. Do not answer the question or add "
+        "background. Return the schema-constrained object only.\n"
         f"Question: {question}"
     )
+
+
+def sentence_decomposition(question: str) -> list[str] | None:
+    """Preserve two or three explicitly separated requirement sentences."""
+    sentences = [
+        value.strip()
+        for value in re.split(r"(?<=[.!?])\s+", question.strip())
+        if value.strip()
+        and not re.match(
+            r"^(?:cite|include|provide|show)\b.*\b(?:citation|citations|source|sources)\b",
+            value.strip(),
+            re.IGNORECASE,
+        )
+    ]
+    if not 2 <= len(sentences) <= 3:
+        return None
+    result = []
+    for sentence in sentences:
+        cleaned = re.sub(r"^then\s+", "", sentence, flags=re.IGNORECASE)
+        clauses = re.split(
+            r"\s+and\s+(?=(?:what|which|who|where|when|why|how)\b)",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        result.extend(_as_question(clause) for clause in clauses)
+    return result if 2 <= len(result) <= 3 else None
 
 
 def validate_decomposition(data: Any, original_question: str) -> list[str] | None:

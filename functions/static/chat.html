@@ -137,6 +137,37 @@
     }
     .help { color: var(--muted); font-size: 12px; line-height: 1.45; }
 
+    .collection-details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(16, 23, 37, 0.62);
+    }
+    .collection-details summary {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 11px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .collection-files {
+      display: grid;
+      gap: 8px;
+      max-height: 150px;
+      margin: 0;
+      padding: 10px 11px;
+      overflow-y: auto;
+      border-top: 1px solid var(--line);
+      list-style: none;
+    }
+    .collection-file { display: grid; gap: 2px; min-width: 0; }
+    .collection-filename { overflow-wrap: anywhere; font-size: 12px; }
+    .collection-file-type { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .danger-button { width: 100%; color: var(--danger); }
+    .danger-button:hover { border-color: rgba(255, 139, 139, 0.55); background: rgba(255, 139, 139, 0.08); }
+
     .sidebar-footer { display: grid; gap: 12px; margin-top: auto; }
     .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
     .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #708098; }
@@ -197,7 +228,19 @@
     }
     .assistant .avatar { border-color: rgba(104, 224, 193, 0.3); color: var(--accent); background: var(--accent-soft); }
     .message-role { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
-    .message-text { margin: 0; white-space: pre-wrap; line-height: 1.7; overflow-wrap: anywhere; }
+    .message-text { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
+    .message-text p { margin: 0; white-space: pre-wrap; }
+    .message-text p + p { margin-top: 10px; }
+    .message-text h3 {
+      margin: 18px 0 7px;
+      color: #dfe8f5;
+      font-size: 13px;
+      line-height: 1.35;
+      letter-spacing: 0.015em;
+    }
+    .message-text p + h3 { margin-top: 15px; }
+    .message-text ul { display: grid; gap: 5px; margin: 0; padding-left: 20px; }
+    .message-text li { padding-left: 2px; }
     .error-message .message-text { color: var(--danger); }
     .meta { margin-top: 9px; color: var(--muted); font-size: 11px; }
 
@@ -206,6 +249,8 @@
     .source { padding: 12px 13px; border-top: 1px solid var(--line); }
     .source-heading { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: 12px; font-weight: 750; }
     .source-score { color: var(--muted); font-weight: 500; }
+    .source-passage + .source-passage { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(43, 57, 78, 0.72); }
+    .source-passage-label { margin: 0; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
     .source-text { margin: 8px 0 0; color: #b8c2d2; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
     .source-toggle { margin-top: 7px; padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
     .source-toggle:hover { text-decoration: underline; }
@@ -279,6 +324,11 @@
           <button class="icon-button" id="refresh" type="button" title="Refresh collections" aria-label="Refresh collections">↻</button>
         </div>
         <div class="help" id="collection-help">Choose the documents used to answer.</div>
+        <details class="collection-details" id="collection-details" hidden>
+          <summary><span>Files in collection</span><span id="collection-file-count">0</span></summary>
+          <ul class="collection-files" id="collection-files"></ul>
+        </details>
+        <button class="secondary-button danger-button" id="delete-collection" type="button" disabled>Delete collection</button>
       </section>
 
       <section class="section">
@@ -341,9 +391,13 @@
   </div>
 
   <script>
-    const state = { history: [], busy: false };
+    const state = { history: [], busy: false, indexes: [] };
     const elements = {
       collection: document.querySelector("#collection"),
+      collectionDetails: document.querySelector("#collection-details"),
+      collectionFiles: document.querySelector("#collection-files"),
+      collectionFileCount: document.querySelector("#collection-file-count"),
+      deleteCollection: document.querySelector("#delete-collection"),
       context: document.querySelector("#conversation-context"),
       messages: document.querySelector("#messages"),
       welcome: document.querySelector("#welcome"),
@@ -379,6 +433,7 @@
         const response = await fetch("/indexes");
         const payload = await response.json();
         if (!response.ok) throw new Error(errorDetail(response, payload));
+        state.indexes = payload.indexes;
         const previous = preferred || elements.collection.value;
         elements.collection.replaceChildren();
         if (!payload.indexes.length) {
@@ -396,16 +451,135 @@
         updateContext();
         setStatus("API connected", "ok");
       } catch (error) {
+        state.indexes = [];
         elements.collection.replaceChildren(new Option("API unavailable", ""));
         elements.collection.disabled = true;
+        updateContext();
         setStatus(error.message, "error");
       }
+    }
+
+    function updateCollectionDetails() {
+      const selected = state.indexes.find(item => item.index_id === elements.collection.value);
+      const documents = Array.isArray(selected?.documents) ? selected.documents : [];
+      elements.collectionDetails.hidden = !selected;
+      elements.collectionFileCount.textContent = String(documents.length);
+      elements.collectionFiles.replaceChildren();
+      for (const documentInfo of documents) {
+        const item = document.createElement("li");
+        item.className = "collection-file";
+        const filename = document.createElement("span");
+        filename.className = "collection-filename";
+        filename.textContent = documentInfo.filename || "Unnamed file";
+        const type = document.createElement("span");
+        type.className = "collection-file-type";
+        type.textContent = documentInfo.type || "document";
+        item.append(filename, type);
+        elements.collectionFiles.append(item);
+      }
+      elements.deleteCollection.disabled = !selected || state.busy;
     }
 
     function updateContext() {
       const selected = elements.collection.value;
       const label = elements.mode.value === "agent" ? "Agent mode" : "Direct RAG";
       elements.context.textContent = selected ? `${selected} · ${label}` : "Select or create a collection";
+      updateCollectionDetails();
+    }
+
+    async function deleteSelectedCollection() {
+      const indexId = elements.collection.value;
+      if (!indexId || state.busy) return;
+      const confirmed = window.confirm(
+        `Delete collection "${indexId}" and all of its uploaded files? This cannot be undone.`
+      );
+      if (!confirmed) return;
+
+      state.busy = true;
+      elements.deleteCollection.disabled = true;
+      elements.collection.disabled = true;
+      elements.send.disabled = true;
+      elements.message.disabled = true;
+      setStatus(`Deleting ${indexId}…`);
+      try {
+        const response = await fetch(`/indexes/${encodeURIComponent(indexId)}`, { method: "DELETE" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(errorDetail(response, payload));
+        state.history = [];
+        await loadCollections();
+        setStatus(`Deleted ${indexId}`, "ok");
+      } catch (error) {
+        setStatus(error.message, "error");
+      } finally {
+        state.busy = false;
+        elements.collection.disabled = state.indexes.length === 0;
+        elements.send.disabled = false;
+        elements.message.disabled = false;
+        updateCollectionDetails();
+      }
+    }
+
+    function sourceReferenceNumbers(text, sources) {
+      const references = new Map();
+      const filenames = [];
+      for (const source of sources) {
+        const filename = source.filename;
+        if (filename && !filenames.includes(filename)) filenames.push(filename);
+      }
+      filenames.sort((left, right) => {
+        const leftPosition = text.indexOf(`[${left}]`);
+        const rightPosition = text.indexOf(`[${right}]`);
+        if (leftPosition < 0 && rightPosition < 0) return 0;
+        if (leftPosition < 0) return 1;
+        if (rightPosition < 0) return -1;
+        return leftPosition - rightPosition;
+      });
+      for (const filename of filenames) {
+        references.set(filename, references.size + 1);
+      }
+      return references;
+    }
+
+    function compactCitations(text, sources) {
+      let formatted = text;
+      for (const [filename, referenceNumber] of sourceReferenceNumbers(text, sources)) {
+        formatted = formatted.split(`[${filename}]`).join(`[${referenceNumber}]`);
+      }
+      return formatted;
+    }
+
+    function appendStructuredText(container, text) {
+      let activeList = null;
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) {
+          activeList = null;
+          continue;
+        }
+        const headingMatch = line.match(/^##\s+(.+)$/);
+        if (headingMatch) {
+          activeList = null;
+          const heading = document.createElement("h3");
+          heading.textContent = headingMatch[1];
+          container.append(heading);
+          continue;
+        }
+        const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+        if (bulletMatch) {
+          if (!activeList) {
+            activeList = document.createElement("ul");
+            container.append(activeList);
+          }
+          const item = document.createElement("li");
+          item.textContent = bulletMatch[1];
+          activeList.append(item);
+          continue;
+        }
+        activeList = null;
+        const paragraph = document.createElement("p");
+        paragraph.textContent = line;
+        container.append(paragraph);
+      }
     }
 
     function appendMessage(role, text, sources = [], metadata = {}) {
@@ -421,9 +595,9 @@
       const label = document.createElement("p");
       label.className = "message-role";
       label.textContent = role === "user" ? "You" : role === "error-message" ? "Request error" : "AGENTIC CRAG";
-      const content = document.createElement("p");
+      const content = document.createElement("div");
       content.className = "message-text";
-      content.textContent = text;
+      appendStructuredText(content, compactCitations(text, sources));
       body.append(label, content);
 
       const metaParts = [];
@@ -439,7 +613,9 @@
 
       const abstained = metadata.termination_reason === "abstained"
         || text.includes("The answer is not present in the provided documents.");
-      if (sources.length) body.append(createSources(sources, !abstained));
+      const supporting = !abstained
+        && sources.every(source => Array.isArray(source.passages));
+      if (sources.length) body.append(createSources(text, sources, supporting));
       item.append(avatar, body);
       elements.messages.append(item);
       elements.messages.scrollTop = elements.messages.scrollHeight;
@@ -455,12 +631,22 @@
       return `${preview}…`;
     }
 
-    function createSources(sources, supporting = true) {
+    function createSources(text, sources, supporting = true) {
       const details = document.createElement("details");
       details.className = "sources";
+      const references = sourceReferenceNumbers(text, sources);
       const summary = document.createElement("summary");
-      const label = supporting ? "supporting source" : "closest retrieved passage";
-      summary.textContent = `${sources.length} ${label}${sources.length === 1 ? "" : "s"}`;
+      const passageCount = sources.reduce((total, source) => {
+        const passages = Array.isArray(source.passages) && source.passages.length
+          ? source.passages
+          : [source];
+        return total + passages.length;
+      }, 0);
+      const documentLabel = sources.length === 1 ? "supporting document" : "supporting documents";
+      const passageLabel = passageCount === 1 ? "cited passage" : "cited passages";
+      summary.textContent = supporting
+        ? `${sources.length} ${documentLabel} \u00b7 ${passageCount} ${passageLabel}`
+        : `${sources.length} closest retrieved passage${sources.length === 1 ? "" : "s"}`;
       details.append(summary);
 
       sources.forEach((source, index) => {
@@ -469,31 +655,51 @@
         const heading = document.createElement("div");
         heading.className = "source-heading";
         const filename = document.createElement("span");
-        filename.textContent = source.filename || `Source ${index + 1}`;
+        const referenceNumber = references.get(source.filename);
+        filename.textContent = source.filename
+          ? `${referenceNumber ? `[${referenceNumber}] ` : ""}${source.filename}`
+          : `Source ${index + 1}`;
         const score = document.createElement("span");
         score.className = "source-score";
-        score.textContent = source.score == null ? "" : `score ${source.score}`;
-        heading.append(filename, score);
-        const excerpt = document.createElement("p");
-        excerpt.className = "source-text";
-        const fullText = (source.text || "No excerpt returned.").trim();
-        const previewText = compactSourceText(fullText);
-        excerpt.textContent = previewText;
-        item.append(heading, excerpt);
-        if (previewText !== fullText) {
-          const toggle = document.createElement("button");
-          toggle.className = "source-toggle";
-          toggle.type = "button";
-          toggle.textContent = "Show more";
-          toggle.setAttribute("aria-expanded", "false");
-          toggle.addEventListener("click", () => {
-            const expanded = toggle.getAttribute("aria-expanded") === "true";
-            excerpt.textContent = expanded ? previewText : fullText;
-            toggle.textContent = expanded ? "Show more" : "Show less";
-            toggle.setAttribute("aria-expanded", String(!expanded));
-          });
-          item.append(toggle);
-        }
+        score.textContent = supporting ? "" : `relevance ${source.score}`;
+        heading.append(filename);
+        if (!supporting && source.score != null) heading.append(score);
+        item.append(heading);
+
+        const passages = Array.isArray(source.passages) && source.passages.length
+          ? source.passages
+          : [{ text: source.text }];
+        passages.forEach((passage, passageIndex) => {
+          const passageItem = document.createElement("div");
+          passageItem.className = "source-passage";
+          if (passages.length > 1) {
+            const passageLabel = document.createElement("p");
+            passageLabel.className = "source-passage-label";
+            passageLabel.textContent = `Cited passage ${passageIndex + 1}`;
+            passageItem.append(passageLabel);
+          }
+          const excerpt = document.createElement("p");
+          excerpt.className = "source-text";
+          const fullText = (passage.text || "No excerpt returned.").trim();
+          const previewText = compactSourceText(fullText);
+          excerpt.textContent = previewText;
+          passageItem.append(excerpt);
+          if (previewText !== fullText) {
+            const toggle = document.createElement("button");
+            toggle.className = "source-toggle";
+            toggle.type = "button";
+            toggle.textContent = "Show more";
+            toggle.setAttribute("aria-expanded", "false");
+            toggle.addEventListener("click", () => {
+              const expanded = toggle.getAttribute("aria-expanded") === "true";
+              excerpt.textContent = expanded ? previewText : fullText;
+              toggle.textContent = expanded ? "Show more" : "Show less";
+              toggle.setAttribute("aria-expanded", String(!expanded));
+            });
+            passageItem.append(toggle);
+          }
+          item.append(passageItem);
+        });
         details.append(item);
       });
       return details;
@@ -546,7 +752,13 @@
         appendMessage("assistant", payload.answer, payload.sources || [], payload);
         state.history.push(
           { role: "user", content: question },
-          { role: "assistant", content: payload.answer }
+          {
+            role: "assistant",
+            content: payload.answer,
+            source_filenames: [...new Set(
+              (payload.sources || []).map(source => source.filename).filter(Boolean)
+            )]
+          }
         );
         setStatus("API connected", "ok");
       } catch (error) {
@@ -611,6 +823,7 @@
       if (!document.querySelector("#welcome")) location.reload();
     });
     elements.refresh.addEventListener("click", () => loadCollections());
+    elements.deleteCollection.addEventListener("click", deleteSelectedCollection);
     elements.collection.addEventListener("change", () => {
       state.history = [];
       updateContext();

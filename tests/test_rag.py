@@ -19,7 +19,9 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
-                        message=SimpleNamespace(content='{"query":"standalone"}')
+                        message=SimpleNamespace(
+                            content='{"query":"standalone","intent":"answer"}'
+                        )
                     )
                 ],
                 usage=None,
@@ -37,7 +39,7 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
     for provider in ("ollama", "groq"):
         monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", provider)
         text, _ = rag.call_model("plan this", node="planner")
-        assert text == '{"query":"standalone"}'
+        assert text == '{"query":"standalone","intent":"answer"}'
 
     for request in requests:
         response_format = request["response_format"]
@@ -50,9 +52,13 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500,
-                }
+                },
+                "intent": {
+                    "type": "string",
+                    "enum": ["answer", "overview"],
+                },
             },
-            "required": ["query"],
+            "required": ["query", "intent"],
             "additionalProperties": False,
         }
 
@@ -267,9 +273,246 @@ def test_answer_entrypoint_uses_shared_retrieval_and_model_call(monkeypatch):
 
     assert calls == [
         ("retrieve", "Unknown fact?", rag.RERANK_TOP_N),
-        ("complete", "synthesis", 120.0),
+        ("complete", "synthesis", 30.0),
     ]
     assert result["answer"] == "The answer is not present in the provided documents."
+
+
+def test_direct_rag_uses_shared_conversational_overview(monkeypatch):
+    source = {
+        "filename": "incident.png",
+        "type": "image",
+        "score": 0.99,
+        "text": (
+            "INCIDENT REPORT Incident ID: OCR-417 Affected service: "
+            "document-ingestion Root cause: OCR batches exceeded the worker memory "
+            "limit. Resolution: Limit each OCR batch to eight pages. Status: Resolved"
+        ),
+    }
+    queries = []
+    monkeypatch.setattr(
+        rag,
+        "retrieve_sources",
+        lambda _index, query, top_k: queries.append((query, top_k)) or [source],
+    )
+    called_nodes = []
+
+    def call_model(_prompt, node, **_kwargs):
+        called_nodes.append(node)
+        responses = {
+            "planner": '{"query":"OCR-417 incident report overview","intent":"overview"}',
+            "overview": json.dumps(
+                {
+                    "answer": (
+                        "This incident report covers OCR-417. The document-ingestion "
+                        "service was affected because OCR batches exceeded the worker "
+                        "memory limit. The issue was resolved by limiting each OCR batch "
+                        "to eight pages. The status is resolved."
+                    )
+                }
+            ),
+        }
+        return responses[node], 10
+
+    monkeypatch.setattr(rag, "call_model", call_model)
+
+    result = rag.ask_index_with_sources(
+        object(),
+        "What is this about?",
+        history=[
+            {"role": "user", "content": "Tell me about incident OCR-417."},
+            {
+                "role": "assistant",
+                "content": "OCR-417 affected document-ingestion [incident.png].",
+                "source_filenames": ["incident.png"],
+            },
+        ],
+    )
+
+    assert queries == [
+        ("OCR-417 incident report overview", rag.RERANK_TOP_N)
+    ]
+    assert called_nodes == ["planner", "overview"]
+    assert result["answer"] == (
+        "This incident report covers OCR-417. The document-ingestion service was "
+        "affected because OCR batches exceeded the worker memory limit. The issue was "
+        "resolved by limiting each OCR batch to eight pages. The status is resolved "
+        "[incident.png]."
+    )
+
+
+def test_direct_rag_uses_shared_structured_multi_field_answer(monkeypatch):
+    source = {
+        "filename": "incident.png",
+        "type": "image",
+        "score": 0.99,
+        "text": (
+            "INCIDENT REPORT Incident ID: OCR-417 Affected service: "
+            "document-ingestion Root cause: OCR batches exceeded the worker memory "
+            "limit. Resolution: Limit each OCR batch to eight pages. Status: Resolved"
+        ),
+    }
+    monkeypatch.setattr(rag, "retrieve_sources", lambda *_args, **_kwargs: [source])
+    monkeypatch.setattr(
+        rag,
+        "call_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("structured fields should not call the model")
+        ),
+    )
+
+    result = rag.ask_index_with_sources(
+        object(),
+        (
+            "For incident OCR-417, which service was affected, what caused it, "
+            "and how was it resolved?"
+        ),
+    )
+
+    assert result["answer"] == (
+        "For incident OCR-417, the report says [incident.png]:\n"
+        "- Affected service: document-ingestion\n"
+        "- What caused it: OCR batches exceeded the worker memory limit.\n"
+        "- How it was resolved: Limit each OCR batch to eight pages."
+    )
+
+
+def test_supporting_sources_follow_citation_order_and_hide_retrieval_scores():
+    sources = [
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "score": 0.91,
+            "text": "Nginx listens publicly on port 80.",
+        },
+        {
+            "filename": "release.docx",
+            "type": "docx",
+            "score": 0.04,
+            "text": "Windows uses .agentic_crag_data and EC2 uses /opt/data.",
+        },
+        {
+            "filename": "noise.docx",
+            "type": "docx",
+            "score": 0.99,
+            "text": "This passage is retrieved but does not support the answer.",
+        },
+    ]
+
+    grouped = rag.supporting_source_groups(
+        (
+            "Windows uses .agentic_crag_data and EC2 uses /opt/data "
+            "[release.docx]. Nginx listens publicly on port 80 [runbook.docx]."
+        ),
+        sources,
+    )
+
+    assert [source["filename"] for source in grouped] == [
+        "release.docx",
+        "runbook.docx",
+    ]
+    assert all("score" not in source for source in grouped)
+    assert grouped[0]["passages"] == [
+        {"text": "Windows uses .agentic_crag_data and EC2 uses /opt/data."}
+    ]
+
+
+def test_supporting_sources_extract_the_exact_cited_passage():
+    grouped = rag.supporting_source_groups(
+        "The configured value is 42 [requirements.docx].",
+        [
+            {
+                "filename": "requirements.docx",
+                "type": "docx",
+                "score": 0.9,
+                "text": (
+                    "Unrelated introductory material. "
+                    "The configured value is 42. "
+                    "Unrelated closing material."
+                ),
+            }
+        ],
+    )
+
+    assert grouped[0]["passages"] == [
+        {"text": "The configured value is 42."}
+    ]
+
+
+def test_supporting_sources_reject_a_cited_document_that_does_not_support_claim():
+    grouped = rag.supporting_source_groups(
+        "The configured value is 42 [noise.docx].",
+        [
+            {
+                "filename": "noise.docx",
+                "type": "docx",
+                "score": 0.99,
+                "text": "This document only discusses deployment scheduling.",
+            }
+        ],
+    )
+
+    assert grouped == []
+
+
+def test_supporting_sources_validate_the_claim_attached_to_each_citation():
+    grouped = rag.supporting_source_groups(
+        (
+            "The configured value is 42 [requirements.docx]. "
+            "Deployment happens on Tuesday [noise.docx]."
+        ),
+        [
+            {
+                "filename": "requirements.docx",
+                "type": "docx",
+                "text": "The configured value is 42.",
+            },
+            {
+                "filename": "noise.docx",
+                "type": "docx",
+                "text": "An archive also records the configured value as 42.",
+            },
+        ],
+    )
+
+    assert [source["filename"] for source in grouped] == ["requirements.docx"]
+
+
+def test_direct_rag_returns_grouped_supporting_documents(monkeypatch):
+    incident = {
+        "filename": "incident.png",
+        "type": "image",
+        "score": 0.2,
+        "text": (
+            "Incident ID: OCR-417 Affected service: document-ingestion "
+            "Root cause: memory pressure."
+        ),
+    }
+    noise = {
+        "filename": "noise.docx",
+        "type": "docx",
+        "score": 0.99,
+        "text": "Unrelated deployment notes.",
+    }
+    monkeypatch.setattr(
+        rag, "retrieve_sources", lambda *_args, **_kwargs: [noise, incident]
+    )
+    monkeypatch.setattr(
+        rag,
+        "call_model",
+        lambda *_args, **_kwargs: (
+            "OCR-417 affected document-ingestion [incident.png].",
+            10,
+        ),
+    )
+
+    result = rag.ask_index_with_sources(object(), "Which service did OCR-417 affect?")
+
+    assert [source["filename"] for source in result["sources"]] == ["incident.png"]
+    assert result["sources"][0]["passages"] == [
+        {"text": "Incident ID: OCR-417 Affected service: document-ingestion"}
+    ]
+    assert "score" not in result["sources"][0]
 
 
 def test_spreadsheet_lookup_matches_requested_row_and_column():

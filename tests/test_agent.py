@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import json
+from threading import Barrier
 from time import perf_counter, sleep
+
+import pytest
 
 from functions.agent import (
     AgentConfig,
     AgentRuntime,
+    _covers_verified_evidence,
+    _structured_multi_part_answer,
     _validate_corrective_queries,
     budget_fallback,
     contains_prompt_injection,
     run_agent,
 )
+from functions.grounding import consolidate_repeated_citations
 
 
 def _coverage_json(*records):
@@ -29,6 +35,115 @@ def _coverage_json(*records):
     )
 
 
+def test_repeated_single_source_citations_are_collapsed():
+    answer = (
+        "The service was affected [incident.png]. "
+        "The incident was resolved [incident.png]."
+    )
+
+    assert consolidate_repeated_citations(answer) == (
+        "The service was affected. The incident was resolved [incident.png]."
+    )
+
+
+def test_flat_multi_part_bullets_are_grouped_under_obligation_headings():
+    answer = (
+        "- Alpha retention is 30 days [retention.docx].\n"
+        "- Beta encryption uses AES-256 [exports.docx]."
+    )
+    results = [
+        {
+            "question": "What is Alpha retention?",
+            "verified_evidence": {
+                "filename": "retention.docx",
+                "quote": "Alpha retention is 30 days.",
+            },
+        },
+        {
+            "question": "What is Beta encryption?",
+            "verified_evidence": {
+                "filename": "exports.docx",
+                "quote": "Beta encryption uses AES-256.",
+            },
+        },
+    ]
+
+    assert _structured_multi_part_answer(answer, results) == (
+        "Here's the breakdown:\n\n"
+        "## Alpha retention\n"
+        "- Alpha retention is 30 days [retention.docx].\n\n"
+        "## Beta encryption\n"
+        "- Beta encryption uses AES-256 [exports.docx]."
+    )
+
+
+def test_related_obligations_still_get_a_semantic_section():
+    answer = (
+        "Windows uses C:/data [storage.docx]. "
+        "Linux uses /srv/data [storage.docx]."
+    )
+    results = [
+        {
+            "question": "What storage location does Windows use?",
+            "verified_evidence": {
+                "filename": "storage.docx",
+                "quote": "Windows uses C:/data.",
+            },
+        },
+        {
+            "question": "What storage location does Linux use?",
+            "verified_evidence": {
+                "filename": "storage.docx",
+                "quote": "Linux uses /srv/data.",
+            },
+        },
+    ]
+
+    structured = _structured_multi_part_answer(answer, results)
+
+    assert structured.startswith("Here's the breakdown:\n\n## Storage locations\n")
+    assert structured.count("\n- ") == 2
+
+
+def test_citation_consolidation_preserves_structured_answer_groups():
+    answer = (
+        "Here's the breakdown:\n\n"
+        "## Cause\n- Memory pressure [incident.png].\n\n"
+        "## Resolution\n- Limit each batch [incident.png]."
+    )
+
+    assert consolidate_repeated_citations(answer) == answer
+
+
+def test_each_structured_section_gets_its_verified_source_citation():
+    answer = (
+        "Here's the breakdown:\n\n"
+        "## Public access\n- Nginx listens publicly on port 80.\n\n"
+        "## Private access\n- Port 8000 remains private [runbook.docx]."
+    )
+    results = [
+        {
+            "question": "Which port is public?",
+            "verified_evidence": {
+                "filename": "runbook.docx",
+                "quote": "Nginx listens publicly on port 80.",
+            },
+        },
+        {
+            "question": "Which port remains private?",
+            "verified_evidence": {
+                "filename": "runbook.docx",
+                "quote": "Port 8000 remains private.",
+            },
+        },
+    ]
+
+    structured = _structured_multi_part_answer(answer, results)
+
+    assert "Nginx listens publicly on port 80 [runbook.docx]." in structured
+    assert structured.count("[runbook.docx]") == 2
+
+
 def test_single_corrective_query_tolerates_a_paraphrased_label():
     missing = ["What does BX-202 state that is relevant to this question?"]
 
@@ -45,6 +160,36 @@ def test_single_corrective_query_tolerates_a_paraphrased_label():
     )
 
     assert result == {missing[0]: "Find the exact documented requirement BX-202"}
+
+
+def test_verified_quote_can_drop_a_complete_trailing_field():
+    results = [
+        {
+            "verified_evidence": {
+                "quote": (
+                    "Resolution: Limit each OCR batch to eight pages. Status: Resolved"
+                )
+            }
+        }
+    ]
+
+    assert _covers_verified_evidence(
+        "Resolution: Limit each OCR batch to eight pages. [incident.png]", results
+    )
+
+
+def test_verified_quote_cannot_drop_facts_after_an_identifier_field():
+    results = [
+        {
+            "verified_evidence": {
+                "quote": (
+                    "Incident ID: OCR-417 Affected service: document-ingestion"
+                )
+            }
+        }
+    ]
+
+    assert not _covers_verified_evidence("Incident ID: OCR-417 [incident.png]", results)
 
 
 def test_corrective_query_rejects_ungrounded_terms():
@@ -234,6 +379,158 @@ def test_follow_up_question_uses_structured_planner(tmp_path, monkeypatch):
     assert result["agent"]["query_history"] == ["canonical EC2 storage path"]
 
 
+@pytest.mark.parametrize(
+    "follow_up",
+    [
+        "What is this image about?",
+        "What is this about?",
+        "Can you explain this?",
+        "Summarize it.",
+        "What does this cover?",
+        "Give me an overview.",
+        "What does the report mean for the incident?",
+        "Help me understand what I'm looking at.",
+        "What's the gist?",
+        "Could you walk me through it?",
+    ],
+)
+def test_follow_up_source_summary_uses_planned_intent_and_conversational_wording(
+    tmp_path, monkeypatch, follow_up
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    retrieved = []
+
+    called_nodes = []
+
+    def complete(_prompt, node, _timeout):
+        called_nodes.append(node)
+        responses = {
+            "planner": '{"query":"OCR-417 incident report overview","intent":"overview"}',
+            "overview": json.dumps(
+                {
+                    "answer": (
+                        "This incident report covers OCR-417. The document-ingestion "
+                        "service was affected because OCR batches exceeded the worker "
+                        "memory limit. The issue was resolved by limiting each OCR batch "
+                        "to eight pages. The status is resolved [incident.png]."
+                    )
+                }
+            ),
+        }
+        return responses[node], 10
+
+    result = run_agent(
+        None,
+        follow_up,
+        history=[
+            {
+                "role": "user",
+                "content": (
+                    "For incident OCR-417, which service was affected, what caused it, "
+                    "and how was it resolved?"
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": (
+                    "OCR-417 affected document-ingestion because OCR batches exceeded "
+                    "the worker memory limit."
+                ),
+                "source_filenames": ["incident.png"],
+            },
+        ],
+        config=AgentConfig(timeout_seconds=2, token_limit=12000),
+        runtime=AgentRuntime(
+            retrieve=lambda query, _top_k: (
+                retrieved.append(query)
+                or [
+                    {
+                        "filename": "incident.png",
+                        "type": "image",
+                        "score": 0.99,
+                        "text": (
+                            "INCIDENT REPORT Incident ID: OCR-417 Affected service: "
+                            "document-ingestion Root cause: OCR batches exceeded the worker "
+                            "memory limit. Resolution: Limit each OCR batch to eight pages. "
+                            "Status: Resolved"
+                        ),
+                    }
+                ]
+            ),
+            complete=complete,
+        ),
+    )
+
+    assert retrieved == ["OCR-417 incident report overview"]
+    assert called_nodes == ["planner", "overview"]
+    assert result["agent"]["query_history"] == retrieved
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["agent"]["token_usage"] == 20
+    assert result["answer"] == (
+        "This incident report covers OCR-417. The document-ingestion service was "
+        "affected because OCR batches exceeded the worker memory limit. The issue was "
+        "resolved by limiting each OCR batch to eight pages. The status is resolved "
+        "[incident.png]."
+    )
+    assert result["answer"].count("[incident.png]") == 1
+
+
+def test_incomplete_or_embellished_overview_uses_complete_grounded_fallback(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    source = {
+        "filename": "incident.png",
+        "type": "image",
+        "score": 0.99,
+        "text": (
+            "INCIDENT REPORT Incident ID: OCR-417 Affected service: "
+            "document-ingestion Root cause: OCR batches exceeded the worker memory "
+            "limit. Resolution: Limit each OCR batch to eight pages. Status: Resolved"
+        ),
+    }
+
+    def complete(_prompt, node, _timeout):
+        responses = {
+            "planner": '{"query":"OCR-417 overview","intent":"overview"}',
+            "overview": json.dumps(
+                {
+                    "answer": (
+                        "This was a critical Optical Character Recognition outage. "
+                        "It caused customer errors and was fixed by limiting batches."
+                    )
+                }
+            ),
+        }
+        return responses[node], 10
+
+    result = run_agent(
+        None,
+        "Help me understand what I'm looking at.",
+        history=[
+            {"role": "user", "content": "Tell me about OCR-417."},
+            {
+                "role": "assistant",
+                "content": "OCR-417 is documented in the image.",
+                "source_filenames": ["incident.png"],
+            },
+        ],
+        runtime=AgentRuntime(
+            retrieve=lambda _query, _top_k: [source],
+            complete=complete,
+        ),
+    )
+
+    assert result["answer"] == (
+        "This image is an incident report about OCR-417. It explains that the "
+        "document-ingestion service was affected because OCR batches exceeded the "
+        "worker memory limit. The fix was to limit each OCR batch to eight pages. "
+        "The report marks the incident as resolved [incident.png]."
+    )
+    assert "Optical Character Recognition" not in result["answer"]
+    assert "customer errors" not in result["answer"]
+
+
 def test_invalid_follow_up_plan_uses_conversation_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     retrieved = []
@@ -365,6 +662,8 @@ def test_invalid_spreadsheet_plan_fails_closed(tmp_path, monkeypatch):
     )
 
     assert result["answer"] == "The answer is not present in the provided documents."
+    assert result["agent"]["confidence"] == "low"
+    assert result["agent"]["termination_reason"] == "abstained"
 
 
 def test_multi_hop_question_retrieves_each_subquestion_once(tmp_path, monkeypatch):
@@ -442,6 +741,377 @@ def test_multi_hop_question_retrieves_each_subquestion_once(tmp_path, monkeypatc
     assert "[runbook.docx]" in result["answer"]
     assert ".agentic_crag_data" in result["answer"]
     assert "/opt/agentic-crag/data" in result["answer"]
+
+
+def test_multi_hop_retrieval_legs_can_run_concurrently(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    rendezvous = Barrier(2)
+
+    def retrieve(query, _top_k):
+        rendezvous.wait(timeout=0.5)
+        if "Windows" in query:
+            return [
+                {
+                    "filename": "releases.docx",
+                    "type": "docx",
+                    "score": 0.9,
+                    "text": "Windows development uses .agentic_crag_data.",
+                }
+            ]
+        return [
+            {
+                "filename": "runbook.docx",
+                "type": "docx",
+                "score": 0.9,
+                "text": "EC2 uses /opt/agentic-crag/data.",
+            }
+        ]
+
+    def complete(_prompt, node, _timeout):
+        if node == "decomposition":
+            return (
+                '{"subquestions":["What storage path is recommended for Windows?",'
+                '"What storage path is recommended for EC2?"]}',
+                10,
+            )
+        if node == "evidence_coverage":
+            return (
+                _coverage_json(
+                    (
+                        "What storage path is recommended for Windows?",
+                        "releases.docx",
+                        "Windows development uses .agentic_crag_data.",
+                    ),
+                    (
+                        "What storage path is recommended for EC2?",
+                        "runbook.docx",
+                        "EC2 uses /opt/agentic-crag/data.",
+                    ),
+                ),
+                10,
+            )
+        assert node == "synthesis"
+        return (
+            "Windows uses .agentic_crag_data [releases.docx], while EC2 uses "
+            "/opt/agentic-crag/data [runbook.docx].",
+            10,
+        )
+
+    result = run_agent(
+        None,
+        "Contrast the recommended local Windows and EC2 storage locations.",
+        runtime=AgentRuntime(retrieve=retrieve, complete=complete),
+    )
+
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["agent"]["iterations"] == 2
+
+
+def test_explicit_multi_sentence_question_reuses_shared_verified_evidence(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    retrieved = []
+    called_nodes = []
+    sources = [
+        {
+            "filename": "releases.docx",
+            "type": "docx",
+            "score": 0.9,
+            "text": (
+                "The default local storage recommendation is .insight_data for Windows "
+                "development and /opt/insight-ai/data for EC2 deployment."
+            ),
+        },
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "score": 0.9,
+                "text": (
+                    "Nginx listens publicly on port 80. FastAPI port 8000 should only bind "
+                    "to localhost. Streamlit port 8501 should only bind to localhost. For a "
+                    "longer-lived deployment, add authentication before sharing the "
+                    "application broadly."
+            ),
+        },
+    ]
+
+    def complete(_prompt, node, _timeout):
+        called_nodes.append(node)
+        assert node == "synthesis"
+        return (
+            "The recommended storage location is .insight_data for Windows "
+            "development, while EC2 deployment uses /opt/insight-ai/data "
+            "[releases.docx]. For network access, Nginx port 80 is public, while "
+            "FastAPI port 8000 and Streamlit port 8501 stay on localhost "
+            "[runbook.docx].",
+            20,
+        )
+
+    question = (
+        "Compare the exact storage locations for Windows development and EC2 deployment. "
+        "Then state which port is public and which application ports remain private. "
+        "Cite each source."
+    )
+    result = run_agent(
+        None,
+        question,
+        runtime=AgentRuntime(
+            retrieve=lambda query, _top_k: retrieved.append(query) or sources,
+            complete=complete,
+        ),
+    )
+
+    assert retrieved == [question]
+    assert called_nodes == ["synthesis"]
+    assert result["agent"]["iterations"] == 1
+    assert result["agent"]["corrective_pass_used"] is False
+    assert result["agent"]["termination_reason"] == "answered"
+    assert ".insight_data" in result["answer"]
+    assert "/opt/insight-ai/data" in result["answer"]
+    assert "port 80" in result["answer"]
+    assert "port 8000" in result["answer"]
+    assert "port 8501" in result["answer"]
+    assert "longer-lived" not in result["answer"]
+    assert "The recommended storage location" in result["answer"]
+    assert "EC2 deployment uses" in result["answer"]
+    assert "## Storage locations" in result["answer"]
+    assert "## Public access" in result["answer"]
+    assert "## Private access" in result["answer"]
+    assert "Nginx port 80 is public [runbook.docx]" in result["answer"]
+
+
+def test_identifier_scoping_removes_supported_but_unasked_port_caveat(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    sources = [
+        {
+            "filename": "04_release_notes.docx",
+            "type": "docx",
+            "score": 0.9,
+            "text": (
+                "Version 2.3 added a default local storage recommendation of "
+                ".agentic_crag_data for Windows development and "
+                "/opt/agentic-crag/data for EC2 deployment."
+            ),
+        },
+        {
+            "filename": "02_aws_deployment_runbook.docx",
+            "type": "docx",
+            "score": 0.9,
+            "text": (
+                "The canonical public web port is 80, not 8501. The canonical "
+                "backend port is 8000, but it should only bind to localhost. The "
+                "canonical UI port is 8501, but it should only bind to localhost. "
+                "Nginx listens publicly on port 80. Inbound HTTP on port 80 may be "
+                "opened to 0.0.0.0/0 for a temporary demo, but the instance should "
+                "be stopped or locked down after use."
+            ),
+        },
+        {
+            "filename": "03_rag_evaluation_plan.docx",
+            "type": "docx",
+            "score": 0.8,
+            "text": "The evaluation plan measures answer quality and retrieval recall.",
+        },
+        {
+            "filename": "01_product_requirements.docx",
+            "type": "docx",
+            "score": 0.7,
+            "text": "The browser interface should remain simple for evaluators.",
+        },
+    ]
+
+    def complete(_prompt, node, _timeout):
+        assert node == "synthesis"
+        return (
+            "For local Windows development, the recommended storage location is "
+            ".agentic_crag_data. For EC2 deployment, the recommended storage "
+            "location is /opt/agentic-crag/data. The canonical public web port is "
+            "80, not 8501. The canonical backend port is 8000, but it should only "
+            "bind to localhost. The canonical UI port is 8501, but it should only "
+            "bind to localhost. Nginx listens publicly on port 80. Inbound HTTP on "
+            "port 80 may be opened to 0.0.0.0/0 for a temporary demo, but the "
+            "instance should be stopped or locked down after use.",
+            20,
+        )
+
+    question = (
+        "Compare the exact recommended storage locations for local Windows development "
+        "and EC2 deployment. Then state which port should be publicly exposed and which "
+        "application ports must remain private."
+    )
+    result = run_agent(
+        None,
+        question,
+        runtime=AgentRuntime(
+            retrieve=lambda _query, _top_k: sources,
+            complete=complete,
+        ),
+    )
+
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["answer"].startswith(
+        "Here's the breakdown:\n\n## Storage locations\n- "
+    )
+    assert "\n\n## Public access\n- Nginx" in result["answer"]
+    assert "\n\n## Private access\n- The backend" in result["answer"]
+    assert result["answer"].count("\n- ") == 5
+    assert ".agentic_crag_data" in result["answer"]
+    assert "/opt/agentic-crag/data" in result["answer"]
+    assert "Nginx listens publicly on port 80" in result["answer"]
+    assert "backend port is 8000" in result["answer"]
+    assert "UI port is 8501" in result["answer"]
+    assert "must remain private" in result["answer"]
+    assert result["answer"].index("Nginx") < result["answer"].index("backend")
+    assert "Inbound HTTP" not in result["answer"]
+    assert "0.0.0.0/0" not in result["answer"]
+    assert [source["filename"] for source in result["sources"]] == [
+        "04_release_notes.docx",
+        "02_aws_deployment_runbook.docx",
+    ]
+    assert all("score" not in source for source in result["sources"])
+    assert result["sources"][0]["passages"] == [
+        {
+            "text": (
+                "Version 2.3 added a default local storage recommendation of "
+                ".agentic_crag_data for Windows development and "
+                "/opt/agentic-crag/data for EC2 deployment."
+            )
+        }
+    ]
+    runbook_passages = [
+        passage["text"] for passage in result["sources"][1]["passages"]
+    ]
+    assert any("Nginx listens publicly on port 80" in text for text in runbook_passages)
+    assert any(
+        "backend port is 8000" in text and "UI port is 8501" in text
+        for text in runbook_passages
+    )
+    assert all("Inbound HTTP" not in text for text in runbook_passages)
+
+
+def test_referential_overview_uses_only_previously_cited_sources(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    release = {
+        "filename": "04_release_notes.docx",
+        "type": "docx",
+        "score": 0.9,
+        "text": (
+            "The release notes recommend .agentic_crag_data for Windows development "
+            "and /opt/agentic-crag/data for EC2 deployment."
+        ),
+    }
+    runbook = {
+        "filename": "02_aws_deployment_runbook.docx",
+        "type": "docx",
+        "score": 0.9,
+        "text": (
+            "The deployment runbook says Nginx port 80 is public while FastAPI port "
+            "8000 and Streamlit port 8501 remain private."
+        ),
+    }
+    distractor = {
+        "filename": "06_risk_register.xlsx",
+        "type": "xlsx",
+        "score": 0.7,
+        "text": "The risk register tracks unrelated operational risks.",
+    }
+    called_nodes = []
+
+    def complete(prompt, node, _timeout):
+        called_nodes.append(node)
+        if node == "planner":
+            return (
+                '{"query":"Windows storage and EC2 ports","intent":"overview"}',
+                10,
+            )
+        raise AssertionError(f"unexpected model call: {node}\n{prompt}")
+
+    result = run_agent(
+        None,
+        "what is this about?",
+        history=[
+            {"role": "user", "content": "Compare Windows and EC2 deployment."},
+            {
+                "role": "assistant",
+                "content": (
+                    "Windows and EC2 use different storage paths "
+                    "[04_release_notes.docx]. Nginx is public while the application "
+                    "ports are private [02_aws_deployment_runbook.docx]."
+                ),
+                "source_filenames": [
+                    "04_release_notes.docx",
+                    "02_aws_deployment_runbook.docx",
+                    "06_risk_register.xlsx",
+                ],
+            },
+        ],
+        runtime=AgentRuntime(
+            retrieve=lambda _query, _top_k: [release, runbook, distractor],
+            complete=complete,
+        ),
+    )
+
+    assert called_nodes == ["planner"]
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["answer"].startswith("This covers:\n- Windows and EC2 deployment")
+    assert result["answer"].count("\n- ") == 1
+    assert "risk" not in result["answer"].casefold()
+    assert {source["filename"] for source in result["sources"]} == {
+        "04_release_notes.docx",
+        "02_aws_deployment_runbook.docx",
+    }
+
+
+def test_plural_collection_overview_is_conversational_and_grounded(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    called_nodes = []
+    retrievals = []
+    sources = [
+        {
+            "filename": "requirements.docx",
+            "type": "docx",
+            "score": 0.9,
+            "text": (
+                "Agentic CRAG is a local-first document question-answering "
+                "application."
+            ),
+        },
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "score": 0.8,
+            "text": "The AWS deployment uses Nginx as the public entry point.",
+        },
+    ]
+
+    def complete(*_args):
+        called_nodes.append("unexpected")
+        raise AssertionError("collection overview should not need a model call")
+
+    result = run_agent(
+        None,
+        "What are the documents about?",
+        runtime=AgentRuntime(
+            retrieve=lambda query, top_k: retrievals.append((query, top_k))
+            or sources,
+            complete=complete,
+        ),
+    )
+
+    assert retrievals == [("What are the documents about?", 10)]
+    assert called_nodes == []
+    assert result["agent"]["termination_reason"] == "answered"
+    assert "These documents cover requirements" in result["answer"]
+    assert "runbook" in result["answer"]
+    assert "[requirements.docx]" in result["answer"]
+    assert "[runbook.docx]" in result["answer"]
 
 
 def test_identifier_only_distractor_triggers_corrective_retrieval(
@@ -652,8 +1322,64 @@ def test_multi_hop_evidence_path_preserves_every_supported_leg(tmp_path, monkeyp
 
         assert all(
             value.casefold() in result["answer"].casefold() for value in required
-        )
+        ), result["answer"]
         assert result["agent"]["termination_reason"] == "answered"
+
+
+def test_short_wrapped_ocr_evidence_is_preserved_for_coverage(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    filename = "incident.png"
+    source_text = (
+        "Document filename: incident.png\n\n"
+        "INCIDENT REPORT\n"
+        "Incident ID: OCR-417\n"
+        "Affected service: document-ingestion\n"
+        "Root cause: OCR batches exceeded the worker\n"
+        "memory limit.\n"
+        "Resolution: Limit each OCR batch to eight pages.\n"
+        "Status: Resolved"
+    )
+    retrieved = []
+
+    def complete(*_args):
+        raise AssertionError("same-record structured fields should not need model calls")
+
+    result = run_agent(
+        None,
+        (
+            "For incident OCR-417, which service was affected, what caused it, "
+            "and how was it resolved?"
+        ),
+        runtime=AgentRuntime(
+            retrieve=lambda query, _top_k: (
+                retrieved.append(query)
+                or [
+                    {
+                        "filename": filename,
+                        "type": "image",
+                        "score": 0.9,
+                        "text": source_text,
+                    }
+                ]
+            ),
+            complete=complete,
+        ),
+    )
+
+    assert retrieved == [
+        "For incident OCR-417, which service was affected, what caused it, and how was "
+        "it resolved?"
+    ]
+    assert result["agent"]["iterations"] == 1
+    assert result["agent"]["token_usage"] == 0
+    assert result["agent"]["termination_reason"] == "answered"
+    assert result["answer"] == (
+        "For incident OCR-417, the report says [incident.png]:\n"
+        "- Affected service: document-ingestion\n"
+        "- What caused it: OCR batches exceeded the worker memory limit.\n"
+        "- How it was resolved: Limit each OCR batch to eight pages."
+    )
+    assert result["answer"].count("[incident.png]") == 1
 
 
 def test_invalid_decomposition_uses_one_bounded_fallback_pass(tmp_path, monkeypatch):

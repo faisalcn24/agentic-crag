@@ -2,6 +2,7 @@ from functions.multihop import (
     decomposition_prompt,
     fallback_decomposition,
     is_multi_hop_question,
+    sentence_decomposition,
     validate_decomposition,
 )
 
@@ -15,6 +16,10 @@ def test_router_recognizes_general_multi_part_questions():
         "What does the first source require, and how does the second source implement it?"
     )
     assert not is_multi_hop_question("What does AB-123 require?")
+    assert not is_multi_hop_question(
+        "For incident OCR-417, which service was affected, what caused it, "
+        "and how was it resolved?"
+    )
 
 
 def test_decomposition_prompt_preserves_question():
@@ -23,10 +28,11 @@ def test_decomposition_prompt_preserves_question():
 
     assert question in prompt
     assert "two to four" in prompt
+    assert "Do not carry a qualifier" in prompt
     assert "Do not answer" in prompt
 
 
-def test_validation_accepts_two_to_four_unique_atomic_questions():
+def test_validation_accepts_two_to_three_unique_atomic_questions():
     original = "Compare policy A with policy B."
     result = validate_decomposition(
         {
@@ -85,4 +91,18 @@ def test_fallback_splits_an_explicit_comparison():
     assert result == [
         "What do the documents say about local storage?",
         "What do the documents say about hosted storage?",
+    ]
+
+
+def test_sentence_decomposition_preserves_explicit_requirement_scopes():
+    question = (
+        "Compare Windows and EC2 storage locations. "
+        "Then state which port is public and which application ports remain private. "
+        "Cite each source."
+    )
+
+    assert sentence_decomposition(question) == [
+        "Compare Windows and EC2 storage locations?",
+        "State which port is public?",
+        "Which application ports remain private?",
     ]

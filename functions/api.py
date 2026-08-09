@@ -48,6 +48,7 @@ app = FastAPI(title="Agentic CRAG API")
 class HistoryTurn(BaseModel):
     role: str
     content: str
+    source_filenames: list[str] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):

@@ -32,7 +32,27 @@ def test_root_serves_graphical_chat_page():
     assert "SOURCE_PREVIEW_LENGTH = 300" in response.text
     assert 'toggle.textContent = "Show more"' in response.text
     assert 'toggle.textContent = expanded ? "Show more" : "Show less"' in response.text
-    assert '"closest retrieved passage"' in response.text
+    assert "closest retrieved passage" in response.text
+    assert 'id="collection-details"' in response.text
+    assert 'id="collection-files"' in response.text
+    assert 'id="delete-collection"' in response.text
+    assert "documentInfo.filename" in response.text
+    assert "window.confirm" in response.text
+    assert 'method: "DELETE"' in response.text
+    assert "encodeURIComponent(indexId)" in response.text
+    assert "function sourceReferenceNumbers(text, sources)" in response.text
+    assert "function compactCitations(text, sources)" in response.text
+    assert "function appendStructuredText(container, text)" in response.text
+    assert 'document.createElement("h3")' in response.text
+    assert 'document.createElement("ul")' in response.text
+    assert "content.textContent = compactCitations" not in response.text
+    assert "references.get(source.filename)" in response.text
+    assert '"supporting document"' in response.text
+    assert '"cited passage"' in response.text
+    assert r"\u00b7" in response.text
+    assert "Â·" not in response.text
+    assert "supporting ? \"\" : `relevance ${source.score}`" in response.text
+    assert "source_filenames" in response.text
 
 
 def test_upload_allowlist_accepts_documents_and_images():

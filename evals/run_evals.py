@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from functions.agent import AgentRuntime, run_agent  # noqa: E402
+from functions.grounding import ABSTENTION  # noqa: E402
 from functions.rag import (  # noqa: E402
     ask_index_with_sources,
     build_index,
@@ -117,11 +119,13 @@ def run_golden_case(index, case: dict[str, Any], mode: str) -> dict[str, Any]:
         agent_metadata = None
     sources = response.get("sources", [])
     expected_sources = set(case.get("expected_source", []))
-    retrieved_sources = {source.get("filename") for source in sources}
-    source_recall = (
-        1.0
-        if not expected_sources
-        else len(expected_sources & retrieved_sources) / len(expected_sources)
+    completed = (
+        agent_metadata.get("termination_reason") == "answered"
+        if agent_metadata is not None
+        else generation_error is None and ABSTENTION not in response.get("answer", "")
+    )
+    metrics = answer_source_metrics(
+        response.get("answer", ""), sources, expected_sources, completed=completed
     )
     return {
         "id": case["id"],
@@ -134,7 +138,54 @@ def run_golden_case(index, case: dict[str, Any], mode: str) -> dict[str, Any]:
         "sources": sources,
         "agent": agent_metadata,
         "generation_error": generation_error,
-        "metrics": {"expected_source_recall": source_recall},
+        "metrics": metrics,
+    }
+
+
+def answer_source_metrics(
+    answer: str,
+    sources: list[dict[str, Any]],
+    expected_sources: set[str],
+    *,
+    completed: bool,
+) -> dict[str, float | None]:
+    if not completed:
+        return {
+            "expected_supporting_source_recall": None,
+            "citation_source_alignment": None,
+            "supporting_evidence_contract": None,
+        }
+
+    returned_filenames = {
+        source.get("filename") for source in sources if source.get("filename")
+    }
+    expected_recall = (
+        1.0
+        if not expected_sources
+        else len(expected_sources & returned_filenames) / len(expected_sources)
+    )
+    cited_filenames = set(re.findall(r"\[([^\[\]\n]+)\]", answer))
+    citation_alignment = float(
+        bool(cited_filenames) and cited_filenames == returned_filenames
+    )
+    evidence_contract = float(
+        bool(sources)
+        and all(
+            "score" not in source
+            and isinstance(source.get("passages"), list)
+            and bool(source["passages"])
+            and all(
+                isinstance(passage, dict)
+                and bool(str(passage.get("text", "")).strip())
+                for passage in source["passages"]
+            )
+            for source in sources
+        )
+    )
+    return {
+        "expected_supporting_source_recall": expected_recall,
+        "citation_source_alignment": citation_alignment,
+        "supporting_evidence_contract": evidence_contract,
     }
 
 

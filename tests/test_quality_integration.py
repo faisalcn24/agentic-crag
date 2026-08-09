@@ -9,11 +9,48 @@ from PIL import Image, ImageDraw, ImageFont
 
 from functions import rag
 from functions.agent import run_agent
-from functions.grounding import extract_grounded_sentence
+from functions.grounding import extract_grounded_sentence, find_grounded_evidence
 
 
 RUN_LIVE_QUALITY_TESTS = os.getenv("AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS") == "1"
 ABSTENTION = "The answer is not present in the provided documents."
+
+
+def test_plural_documents_question_is_an_overview_request():
+    assert rag.classify_answer_intent("What are the documents about?") == "overview"
+
+
+def test_conversational_grounding_keeps_plain_private_port_summary():
+    sources = [
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "text": (
+                "The canonical public web port is 80, not 8501. The canonical backend "
+                "port is 8000, but it should only bind to localhost. The canonical UI "
+                "port is 8501, but it should only bind to localhost. FastAPI listens on "
+                "127.0.0.1:8000 and Streamlit listens on 127.0.0.1:8501."
+            ),
+        }
+    ]
+
+    answer = rag.ground_conversational_answer(
+        "Which port is public and which application ports remain private?",
+        (
+            "The canonical public web port is 80, not 8501. The canonical backend port "
+            "is 8000, but it should only bind to localhost. The canonical UI port is "
+            "8501, but it should only bind to localhost. FastAPI uses port 8000 and "
+            "Streamlit uses port 8501, so both remain private on localhost."
+        ),
+        sources,
+    )
+
+    assert "canonical" not in answer.casefold()
+    assert "backend port is 8000" not in answer
+    assert "UI port is 8501" not in answer
+    assert "FastAPI uses port 8000" in answer
+    assert "Streamlit uses port 8501" in answer
+    assert answer.count("[runbook.docx]") == 1
 
 
 def test_real_ocr_reads_image_and_scanned_pdf(tmp_path: Path):
@@ -208,6 +245,42 @@ def test_grounder_uses_source_context_but_returns_only_the_supporting_sentence()
     assert answer == "FastAPI listens on 127.0.0.1:8000. [runbook.docx]"
 
 
+def test_grounder_keeps_flattened_structured_fields_concise():
+    sources = [
+        {
+            "filename": "incident.png",
+            "type": "image",
+            "text": (
+                "Document filename: incident.png INCIDENT REPORT "
+                "Incident ID: OCR-417 Affected service: document-ingestion "
+                "Root cause: OCR batches exceeded the worker memory limit. "
+                "Resolution: Limit each OCR batch to eight pages. Status: Resolved"
+            ),
+        }
+    ]
+
+    answer = rag.ground_generated_answer(
+        (
+            "For incident OCR-417, which service was affected, what caused it, "
+            "and how was it resolved?"
+        ),
+        (
+            "The document-ingestion service was affected in incident OCR-417. "
+            "The root cause of the incident was that OCR batches exceeded the worker "
+            "memory limit. The resolution to the incident was to limit each OCR batch "
+            "to eight pages."
+        ),
+        sources,
+    )
+
+    assert answer == (
+        "- Incident ID: OCR-417\n"
+        "  Affected service: document-ingestion [incident.png]\n"
+        "- Root cause: OCR batches exceeded the worker memory limit. [incident.png]\n"
+        "- Resolution: Limit each OCR batch to eight pages. [incident.png]"
+    )
+
+
 def test_adjacent_evidence_sentences_preserve_section_context():
     sources = [
         {
@@ -259,6 +332,37 @@ def test_extractive_grounding_handles_a_lexical_paraphrase_without_nli():
 
     assert extract_grounded_sentence(question, sources) == (
         "Validate Nginx config with sudo nginx -t. [runbook.docx]"
+    )
+
+
+def test_complex_port_coverage_prefers_the_exact_public_and_private_sentences():
+    sources = [
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "text": (
+                "Security Group Rules Inbound SSH on port 22 should be restricted. "
+                "Inbound HTTP on port 80 may be opened temporarily. "
+                "The EC2 instance should not expose FastAPI port 8000 or Streamlit "
+                "port 8501 directly to the public internet. Nginx listens publicly "
+                "on port 80."
+            ),
+        }
+    ]
+
+    public = find_grounded_evidence(
+        "Which port should be publicly exposed?", sources, allow_complex=True
+    )
+    private = find_grounded_evidence(
+        "Which application ports must remain private?", sources, allow_complex=True
+    )
+
+    assert public is not None
+    assert public.text == "Nginx listens publicly on port 80."
+    assert private is not None
+    assert private.text == (
+        "The EC2 instance should not expose FastAPI port 8000 or Streamlit port "
+        "8501 directly to the public internet."
     )
 
 

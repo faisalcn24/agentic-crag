@@ -8,11 +8,26 @@ one bounded corrective retrieval pass.
 Agentic CRAG turns PDF, DOCX, XLSX, and image files into persistent collections
 that can be queried through a browser, REST API, or MCP server. Parsing,
 embeddings, retrieval, and storage remain local. Generation uses local Ollama by
-default, with Groq available as an explicit hosted option.
+default. Groq is an explicit hosted option that receives only the question and
+retrieved excerpts.
+
+## Interface
+
+![Agentic CRAG answering a multi-part deployment question with cited supporting passages](pics/crag_docs.png)
+
+*Structured answers grounded in cited document passages.*
+
+![Agentic CRAG answering questions about an incident report extracted from an image](pics/crag_png.png)
+
+*Local OCR turns uploaded images into searchable, cited evidence.*
 
 ## What stands out
 
-- **Grounded answers:** unsupported claims are removed and missing answers abstain.
+- **Grounded, inspectable answers:** unsupported claims are removed, missing
+  answers abstain, and completed answers show only cited, verified passages grouped
+  by document.
+- **Structured multi-part answers:** verified claims are organized under semantic
+  headings with one claim per bullet and citations attached to the relevant group.
 - **Hybrid retrieval:** BM25 and vector results are fused and reranked, improving
   both semantic search and exact-identifier lookup.
 - **Bounded correction:** multi-part questions are decomposed, checked against
@@ -52,8 +67,16 @@ ollama pull llama3.2:3b
 .\run.bat
 ```
 
+Keep Ollama running while asking questions. Hugging Face model loading is
+cache-only during normal operation. If the BGE embedding and reranker models are
+not cached yet, set `$env:HF_HUB_OFFLINE = "0"` and
+`$env:TRANSFORMERS_OFFLINE = "0"` for the first indexing and retrieval session,
+then remove those overrides.
+
 Open `http://localhost:8000`, create a collection, and upload files from
-`documents/`. API documentation is at `http://localhost:8000/docs`.
+`documents/`. API documentation is at `http://localhost:8000/docs`. The default
+development configuration stores uploads, indexes, the collection registry, and
+query metrics under `.agentic_crag_data/`.
 
 Try:
 
@@ -62,8 +85,16 @@ Try:
 - `Contrast the recommended local Windows and EC2 storage locations.`
 - `What was the company payroll for 2026?` (demonstrates abstention)
 
-Run the MCP server with `python -m functions.mcp_server`. It exposes collection
-discovery, corpus search, and grounded answering tools over stdio.
+Run the MCP server with `python -m functions.mcp_server`. It exposes the
+`collections://all` resource plus `search_corpus` and `answer_question` tools over
+stdio by default.
+
+## Deploy to EC2
+
+Use `/opt/agentic-crag/data` for persistent application data. Expose only Nginx on
+port 80; keep FastAPI port 8000 and Ollama port 11434 bound to localhost. The
+bundled browser UI is served by FastAPI and does not require a separate frontend
+port. See the [deployment guide](docs/DEPLOYMENT.md) for setup and update commands.
 
 ## Verification
 
@@ -72,13 +103,15 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ruff check functions tests evals scripts
 python -m compileall -q functions tests evals scripts
+python -m pip check
 ```
 
-The current generalized runtime passes **101 default tests plus two opt-in live
-model/reranker checks**. A retained 60-question corpus review is available
-as [historical evaluation evidence](docs/EVALUATION.md), but it predates the
-removal of corpus-specific shortcuts and is not presented as a current
-general-data accuracy score.
+The current generalized runtime passes **140 default tests with 2 optional live
+checks skipped**. Set `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1` to opt into the real
+reranker and Ollama checks. A retained 60-question corpus review is available as
+[historical evaluation evidence](docs/EVALUATION.md), but it predates the removal
+of corpus-specific shortcuts and is not presented as a current general-data
+accuracy score.
 
 ## Boundaries
 

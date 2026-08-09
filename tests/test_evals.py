@@ -58,7 +58,12 @@ def test_single_case_uses_current_telemetry_api(tmp_path, monkeypatch):
 
 
 def test_agent_case_preserves_answers_and_sources_for_direct_review(monkeypatch):
-    source = {"filename": "requirements.docx", "text": "The value is 42."}
+    source = {
+        "filename": "requirements.docx",
+        "type": "docx",
+        "text": "The value is 42.",
+        "passages": [{"text": "The value is 42."}],
+    }
     monkeypatch.setattr(
         runner,
         "run_agent",
@@ -82,7 +87,87 @@ def test_agent_case_preserves_answers_and_sources_for_direct_review(monkeypatch)
     assert result["expected_answer"] == "42"
     assert result["answer"] == "The value is 42 [requirements.docx]."
     assert result["sources"] == [source]
-    assert result["metrics"] == {"expected_source_recall": 1.0}
+    assert result["metrics"] == {
+        "expected_supporting_source_recall": 1.0,
+        "citation_source_alignment": 1.0,
+        "supporting_evidence_contract": 1.0,
+    }
+
+
+def test_answer_source_metrics_reject_uncited_supporting_documents(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run_agent",
+        lambda *_args: {
+            "answer": "The value is 42 [requirements.docx].",
+            "sources": [
+                {
+                    "filename": "requirements.docx",
+                    "type": "docx",
+                    "text": "The value is 42.",
+                    "passages": [{"text": "The value is 42."}],
+                },
+                {
+                    "filename": "noise.docx",
+                    "type": "docx",
+                    "text": "Unrelated text.",
+                    "passages": [{"text": "Unrelated text."}],
+                },
+            ],
+            "agent": {"termination_reason": "answered"},
+        },
+    )
+    case = {
+        "id": "noisy-sources",
+        "stratum": "single-hop",
+        "question": "What is the value?",
+        "expected_answer": "42",
+        "expected_source": ["requirements.docx"],
+        "answer_should_exist": True,
+    }
+
+    result = runner.run_golden_case(object(), case, "agent")
+
+    assert result["metrics"] == {
+        "expected_supporting_source_recall": 1.0,
+        "citation_source_alignment": 0.0,
+        "supporting_evidence_contract": 1.0,
+    }
+
+
+def test_abstention_sources_remain_retrieval_diagnostics(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "run_agent",
+        lambda *_args: {
+            "answer": runner.ABSTENTION,
+            "sources": [
+                {
+                    "filename": "closest.docx",
+                    "type": "docx",
+                    "text": "The closest passage does not answer the question.",
+                    "score": 0.61,
+                }
+            ],
+            "agent": {"termination_reason": "abstained"},
+        },
+    )
+    case = {
+        "id": "unanswerable",
+        "stratum": "unanswerable",
+        "question": "What is missing?",
+        "expected_answer": runner.ABSTENTION,
+        "expected_source": [],
+        "answer_should_exist": False,
+    }
+
+    result = runner.run_golden_case(object(), case, "agent")
+
+    assert result["metrics"] == {
+        "expected_supporting_source_recall": None,
+        "citation_source_alignment": None,
+        "supporting_evidence_contract": None,
+    }
 
 
 def test_false_premise_answer_is_left_for_manual_review(monkeypatch):

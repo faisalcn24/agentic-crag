@@ -30,7 +30,9 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 ## D-005: Pin evaluation inputs and review answers directly
 
-- **Decision:** Keep versioned JSONL datasets, save raw generated answers and retrieved sources, and inspect every answer against the expected answer and source text.
+- **Decision:** Keep versioned JSONL datasets, save raw generated answers and the
+  evidence returned with each answer, and inspect every answer against the expected
+  answer and source text.
 - **Why:** Direct review makes failures understandable and avoids delegating acceptance to another model.
 - **Rejected:** Regenerating questions per run or using automated answer scores as current acceptance criteria. Automated scoring may be reconsidered later.
 
@@ -38,9 +40,11 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 - **Decision:** Retrieve exactly once for an ordinary standalone question. For a
   recognized multi-hop question, perform one non-recursive decomposition into
-  two to four focused retrievals, require an exact source quote for each leg,
-  and allow one corrective retrieval for each missing leg. Revalidate once, then
-  answer or terminally abstain. Retain the 30-second deadline and token accounting.
+  two to four evidence obligations, require an exact source quote for each leg,
+  and allow one corrective retrieval for each missing leg. Explicit requirements
+  may share one broad initial retrieval; independent retrieval legs run
+  concurrently. Revalidate once, then answer or terminally abstain. Retain the
+  30-second deadline and token accounting.
 - **Why:** The earlier open sufficiency/reformulation loop terminated 58 of 60
   agent cases through loop safeguards instead of normal answers. A single
   corrective pass addresses incomplete retrieval without recreating that loop.
@@ -97,11 +101,15 @@ Decisions are recorded before measurements so later results are not tuned to a p
 ## D-012: Use bounded decomposition for multi-document questions
 
 - **Decision:** Decompose recognized complex questions once into two to four
-  independent evidence queries. Verify each claimed supporting quote against the
-  named source, correct missing legs once, and synthesize only after terminal
-  revalidation succeeds.
-- **Why:** One broad query can retrieve the right documents without exposing all
-  required facts to the answer step.
+  evidence obligations. Preserve explicit sentence and clause scope, reuse one
+  initial result set when the original query retrieves evidence for every
+  obligation, and run genuinely independent retrieval legs concurrently. Verify
+  each claimed supporting quote against the named source, correct only missing
+  legs once, and synthesize only after terminal revalidation succeeds.
+- **Why:** Explicit multi-part prompts often retrieve both required documents in
+  one well-formed query. Replanning and sequentially retrieving every clause spent
+  the wall-clock budget without improving evidence, while focused retrieval is
+  still necessary when the shared result set has a missing leg.
 - **Rejected:** Recursive agents, open-ended planning, and an indexing migration
   while source recall remains 100%.
 
@@ -145,3 +153,142 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Guard:** Keep those scenarios as black-box regression tests. A historical
   evaluation result may be retained, but it must be labeled historical after a
   behavior-changing refactor until a new live review is completed.
+
+## D-016: Separate same-record answers from cross-source decomposition
+
+- **Decision:** Route multi-field questions about one identifiable record through
+  one retrieval and grounded structured-field presentation. Reserve decomposition
+  for questions that compare, connect, or otherwise require evidence from distinct
+  records or sources. Present one citation per source-backed answer group and use
+  conversational prose for source overviews.
+- **Why:** Treating every multi-part sentence as multi-hop added model calls until
+  the 30-second deadline even when one retrieved passage contained every answer.
+  Repeating the same citation on every field also obscured the answer without
+  adding provenance.
+- **Guard:** Field selection and presentation remain corpus-agnostic; exact values
+  come from parsed source labels, and unfamiliar structures continue through the
+  existing grounded synthesis path.
+
+## D-017: Preserve conversational intent and source referents
+
+- **Decision:** Have the schema-constrained conversation planner return both a
+  standalone retrieval query and an answer operation (`answer` or `overview`),
+  attach supporting filenames to assistant history turns, and use the same
+  overview and structured-answer presentation in browser Agent and Direct RAG
+  modes. Phrase matching is only a planner-failure fallback. Overview generation
+  is schema-constrained and claim-grounded; structured sources additionally need
+  every available core field represented or fall back to a generic grounded
+  renderer.
+- **Why:** Query rewriting correctly found a referenced document while losing the
+  user's overview intent. A phrase-specific shortcut then worked only when the
+  user explicitly wrote "image" or "document," and the extractive grounder
+  rejected otherwise useful conversational paraphrases.
+- **Guard:** Exact identifiers, numbers, paths, and quoted field values retain
+  strict grounding. Conversational formatting may reorganize supported facts but
+  cannot add definitions, causes, or implications absent from retrieved text.
+  The fallback operates on generic labeled-field roles and contains no collection,
+  filename, identifier, or expected-answer table.
+
+## D-018: Verify answer coverage by obligation, not verbatim quote reproduction
+
+- **Decision:** Keep literal source verification for evidence selection, then
+  validate the grounded final answer against each original evidence obligation.
+  Do not require synthesized prose to reproduce an entire verified quote. For
+  plural requests, prefer the shortest passage that contains at least two matching
+  items, and reject evidence whose public/private polarity conflicts with the
+  question.
+- **Why:** Requiring the final answer to repeat every word of a supporting passage
+  replaced concise correct synthesis with unrelated neighboring security details.
+  Obligation-level validation retains the requested paths and ports while source
+  quote verification continues to prevent unsupported claims.
+- **Guard:** This changes presentation coverage only. Evidence must still be an
+  exact substring of a retrieved named source, and generated claims remain subject
+  to the existing grounding pass.
+
+## D-019: Separate collection overviews from single-source summaries
+
+- **Decision:** Treat plural questions about the selected documents or collection
+  as collection overviews. Retrieve up to ten passages, retain at most one
+  representative passage per filename, and present up to six human-readable file
+  topics with one citation per distinct source. Keep single-document and referential
+  follow-up summaries on the model-generated, claim-grounded path.
+- **Why:** A vague collection query returned duplicate passages from the highest
+  scoring file. The small generation model then described that file as the entire
+  collection or invented an unsupported umbrella description, which the grounding
+  layer correctly rejected as answer-not-present.
+- **Guard:** Collection topic labels are derived generically from retrieved source
+  filenames and preserve acronym casing found in source text. The runtime contains
+  no collection names, expected topics, or bundled-corpus answer table.
+
+## D-020: Scope conversational claims to verified obligations
+
+- **Decision:** When every leg of a multi-part question explicitly targets an
+  identifier-bearing value such as a path, storage location, port, address, or ID,
+  and every verified leg contains exact identifiers, retain only generated claims
+  whose identifiers are contained in one verified leg, then order retained claims
+  by the user's obligations. Treat loopback
+  addresses as private presentation context and translate localhost-only binding
+  into plain private-access wording when that is what the user asked. For a
+  referential overview of a prior multi-source answer, use only the filenames
+  actually cited in that answer and describe the prior question's topic directly.
+- **Why:** A grounded but unrequested HTTP/CIDR caveat survived claim verification,
+  while a vague follow-up retrieved unrelated passages and repeatedly abstained.
+  Source support alone does not establish that a sentence is necessary for the
+  requested answer.
+- **Guard:** Identifier scoping activates only when every evidence obligation asks
+  for an identifier-bearing value and has exact identifiers; semantic comparisons
+  and other question types retain the existing grounded synthesis path. Referential
+  topic wording is derived from conversation text and cited filenames, not
+  collection-specific facts.
+
+## D-021: Structure multi-part answers after grounding
+
+- **Decision:** Once multi-part synthesized claims have passed evidence grounding,
+  group them by the question's verified evidence obligations under semantic section
+  headings, with one claim per bullet. Keep existing structured-field answers intact
+  and leave simple answers as paragraphs. Present referential overviews of
+  multi-part conversations as a short topic list. In the browser, parse only this
+  small heading/list convention into native DOM nodes whose content is assigned with
+  `textContent`.
+- **Why:** Correct grounded facts were difficult to scan when rendered as one dense
+  paragraph, especially when paths, public ports, and private ports appeared
+  together.
+- **Guard:** Formatting runs after grounding and cannot create, remove, or rewrite
+  factual claims or citations. Headings are derived from obligation intent, not
+  collection names, filenames, or expected facts. The UI never passes answer text
+  through `innerHTML` or another executable HTML sink.
+
+## D-022: Keep cached Hugging Face model loading offline at runtime
+
+- **Decision:** Set Hugging Face and Transformers offline mode before importing
+  their runtime libraries, while respecting an operator's explicit environment
+  override.
+- **Why:** A fresh API worker attempted a remote model metadata request even though
+  the embedding model was cached locally. After the blocked request, Hugging Face
+  retried with a closed HTTP client and surfaced `RuntimeError` before retrieval.
+- **Guard:** This changes only runtime cache lookup. It does not change model names,
+  embeddings, index compatibility, retrieval ranking, or answer content.
+
+## D-023: Separate supporting evidence from retrieval diagnostics
+
+- **Decision:** Return raw ranked passages and reranker scores only from retrieval
+  diagnostics (`/retrieve` and MCP `search_corpus`) or with an abstention. For a
+  completed answer, return only cited evidence, grouped by document and ordered by
+  first citation appearance. Multi-part agent answers expose the exact passages
+  verified for their evidence obligations; ordinary grounded answers expose the
+  best cited passage from each named document.
+- **Why:** The answer APIs previously returned every top-k candidate as a
+  "supporting source," including unused documents and duplicate chunks. Cross-
+  encoder outputs are useful for ordering candidates but are not calibrated
+  confidence values: one required release-note passage ranked below unrelated
+  candidates and still contained the exact answer.
+- **Guard:** Do not use a fixed reranker-score cutoff to decide support. A passage
+  supports an answer because the answer cites it and the grounding or obligation
+  verifier confirmed its text. The browser hides scores for supporting evidence,
+  numbers references by first citation appearance, and labels abstention results as
+  closest retrieved passages rather than evidence.
+- **Evaluation contract:** New runs report expected supporting-source recall,
+  exact citation/source alignment, and grouped-evidence shape. These are mechanical
+  provenance checks, not automated answer-correctness scores. The retained August 3
+  `expected_source_recall` value measured the older top-k response and is not
+  directly comparable.
