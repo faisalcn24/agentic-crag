@@ -11,16 +11,6 @@ embeddings, retrieval, and storage remain local. Generation uses local Ollama by
 default. Groq is an explicit hosted option that receives only the question and
 retrieved excerpts.
 
-## Interface
-
-![Agentic CRAG answering a multi-part deployment question with cited supporting passages](pics/crag_docs.png)
-
-*Structured answers grounded in cited document passages.*
-
-![Agentic CRAG answering questions about an incident report extracted from an image](pics/crag_png.png)
-
-*Local OCR turns uploaded images into searchable, cited evidence.*
-
 ## What stands out
 
 - **Grounded, inspectable answers:** unsupported claims are removed, missing
