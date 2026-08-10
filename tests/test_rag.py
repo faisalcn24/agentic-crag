@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import openpyxl
 from docx import Document
+from llama_index.core.embeddings import MockEmbedding
 from llama_index.core.schema import NodeWithScore, TextNode
 
 from functions import rag
@@ -237,10 +238,18 @@ def test_load_index_reuses_cached_instance(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(rag, "_loaded_indexes", {})
     monkeypatch.setattr(rag, "setup_embeddings", lambda: None)
+    vector_store = object()
+    monkeypatch.setattr(
+        rag,
+        "_chroma_vector_store",
+        lambda _index_id, recreate=False: vector_store,
+    )
     monkeypatch.setattr(
         rag.StorageContext,
         "from_defaults",
-        lambda persist_dir: SimpleNamespace(persist_dir=persist_dir),
+        lambda persist_dir, vector_store: SimpleNamespace(
+            persist_dir=persist_dir, vector_store=vector_store
+        ),
     )
     monkeypatch.setattr(
         rag,
@@ -251,6 +260,72 @@ def test_load_index_reuses_cached_instance(tmp_path: Path, monkeypatch):
     assert rag.load_index("demo") is expected
     assert rag.load_index("demo") is expected
     assert loaded == [str(index_dir)]
+
+
+def test_chroma_index_persists_multi_file_nodes(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setattr(rag, "_embedding_model", MockEmbedding(embed_dim=8))
+    monkeypatch.setattr(rag, "_loaded_indexes", {})
+
+    rag.build_index(
+        [
+            {
+                "filename": "alpha.docx",
+                "type": "docx",
+                "text": "Document filename: alpha.docx\n\nProject ORBIT-99 is cobalt.",
+            },
+            {
+                "filename": "beta.pdf",
+                "type": "pdf",
+                "text": "Document filename: beta.pdf\n\nProject NOVA-42 is amber.",
+            },
+            {
+                "filename": "budget.xlsx-Budget",
+                "type": "xlsx",
+                "text": (
+                    "Document filename: budget.xlsx\nSheet: Budget\n\n"
+                    "Project: SOLAR-7 | Budget_USD: 125"
+                ),
+            },
+        ],
+        "multi-file",
+    )
+
+    collection = rag._chroma_client().get_collection(
+        rag._chroma_collection_name("multi-file"), embedding_function=None
+    )
+    assert collection.count() == 3
+    assert (rag.get_indexes_dir() / "multi-file" / "docstore.json").exists()
+
+    rag._loaded_indexes.clear()
+    loaded = rag.load_index("multi-file")
+    filenames = {
+        node.metadata.get("filename") for node in loaded.docstore.docs.values()
+    }
+    assert filenames == {"alpha.docx", "beta.pdf", "budget.xlsx-Budget"}
+    vector_matches = loaded.as_retriever(similarity_top_k=3).retrieve("Project ORBIT-99")
+    assert {item.node.metadata["filename"] for item in vector_matches} == filenames
+    keyword_matches = rag._bm25_candidates(loaded, "ORBIT-99", top_k=2)
+    assert keyword_matches[0].node.metadata["filename"] == "alpha.docx"
+
+
+def test_remove_index_deletes_its_chroma_collection(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+    index_dir = rag.get_indexes_dir() / "demo"
+    index_dir.mkdir(parents=True)
+    rag.get_registry_file().write_text(
+        json.dumps({"demo": {"documents": []}}), encoding="utf-8"
+    )
+    client = rag._chroma_client()
+    client.create_collection(
+        rag._chroma_collection_name("demo"), embedding_function=None
+    )
+
+    assert rag.remove_index("demo") is True
+    assert not index_dir.exists()
+    assert rag._chroma_collection_name("demo") not in {
+        collection.name for collection in client.list_collections()
+    }
 
 
 def test_answer_entrypoint_uses_shared_retrieval_and_model_call(monkeypatch):
@@ -526,7 +601,7 @@ def test_spreadsheet_lookup_matches_requested_row_and_column():
     }
 
     assert (
-        rag.answer_spreadsheet_lookup(
+        rag.extract_spreadsheet_lookup(
             "What is the projected Q3 Groq API budget?", [source]
         )
         == "$75 [budget.xlsx-Quarterly Budget]"
@@ -546,7 +621,7 @@ def test_spreadsheet_lookup_ignores_notes_when_matching_a_row():
     }
 
     assert (
-        rag.answer_spreadsheet_lookup(
+        rag.extract_spreadsheet_lookup(
             "What was the Q1 Groq API budget and actual spend?", [source]
         )
         == "Budget: $40; Actual: $28 [budget.xlsx-Quarterly Budget]"
@@ -564,7 +639,7 @@ def test_spreadsheet_lookup_uses_requested_latency_field():
     }
 
     assert (
-        rag.answer_spreadsheet_lookup(
+        rag.extract_spreadsheet_lookup(
             "What retrieval time was recorded for the spreadsheet-heavy benchmark?",
             [source],
         )
@@ -686,20 +761,3 @@ def test_spreadsheet_excerpt_keeps_rows_relevant_to_query():
 
     assert "Quarter: Q3 | Category: Groq API | Budget_USD: 75" in excerpt
     assert excerpt.count("Quarter:") == 2
-
-
-def test_spreadsheet_excerpt_keeps_all_rows_for_analytical_query():
-    text = "\n".join(
-        [
-            "Document filename: benchmarks.xlsx",
-            "Document_Set: one | Retrieval_Time_ms: 10",
-            "Document_Set: two | Retrieval_Time_ms: 20",
-            "Document_Set: three | Retrieval_Time_ms: 30",
-        ]
-    )
-
-    excerpt = rag._spreadsheet_excerpt(
-        text, "Which benchmark has the slowest retrieval time?", max_rows=1
-    )
-
-    assert excerpt == text

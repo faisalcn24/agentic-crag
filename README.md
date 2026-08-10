@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml/badge.svg)](https://github.com/faisalcn24/agentic-crag/actions/workflows/ci.yml)
 
-Local-first document question answering with citations, OCR, hybrid search, and
-one bounded corrective retrieval pass.
+Local-first document question answering with citations, OCR, hybrid search,
+persistent Chroma vector storage, and one bounded corrective retrieval pass.
 
 Agentic CRAG turns PDF, DOCX, XLSX, and image files into persistent collections
 that can be queried through a browser, REST API, or MCP server. Parsing,
@@ -23,18 +23,19 @@ retrieved excerpts.
 - **Bounded correction:** multi-part questions are decomposed, checked against
   exact source quotes, and receive at most one corrective retrieval per missing
   part—never an open-ended agent loop.
-- **Document support:** local OCR handles images and scanned PDFs; validated
-  operations compiled to DuckDB handle spreadsheet analysis.
+- **Document support:** local OCR handles images and scanned PDFs; openpyxl turns
+  XLSX sheets into labeled, retrieval-ready text with sheet metadata intact.
 - **Three interfaces:** a dependency-free web UI, FastAPI endpoints, and MCP tools
   for Claude Code or another compatible host.
 
-**Stack:** Python 3.13, FastAPI, LlamaIndex, BM25, BGE embeddings/reranking,
-RapidOCR, DuckDB, Ollama, optional Groq, MCP, pytest, and Ruff.
+**Stack:** Python 3.13, FastAPI, LlamaIndex, ChromaDB, BM25, BGE
+embeddings/reranking, RapidOCR, openpyxl, Ollama, optional Groq, MCP, pytest, and
+Ruff.
 
 ## Architecture
 
 ```text
-documents -> parse / OCR -> chunk -> persistent vector index
+documents -> parse / OCR -> chunk -> persistent Chroma vector index
                                       |
 question -> BM25 + vector -> fusion -> rerank -> grounded answer
                                       |
@@ -71,7 +72,7 @@ query metrics under `.agentic_crag_data/`.
 Try:
 
 - `What does FR-006 require?`
-- `How much faster was tiny-smoke retrieval than large-policy-pack retrieval?`
+- `What is the projected Q3 Groq API budget?`
 - `Contrast the recommended local Windows and EC2 storage locations.`
 - `What was the company payroll for 2026?` (demonstrates abstention)
 
@@ -96,7 +97,7 @@ python -m compileall -q functions tests evals scripts
 python -m pip check
 ```
 
-The current generalized runtime passes **140 default tests with 2 optional live
+The current generalized runtime passes **128 default tests with 2 optional live
 checks skipped**. Set `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1` to opt into the real
 reranker and Ollama checks. A retained 60-question corpus review is available as
 [historical evaluation evidence](docs/EVALUATION.md), but it predates the removal
@@ -108,7 +109,8 @@ accuracy score.
 This is a trusted local demo, not a public multi-tenant service. Add
 authentication, HTTPS, rate limiting, and a retention policy before accepting
 private uploads through a public endpoint. OCR is tested on printed text, not
-handwriting or arbitrary layouts.
+handwriting or arbitrary layouts. XLSX sheets support retrieval and grounded row
+lookups, not guaranteed full-sheet aggregation or database-style analytics.
 
 See [engineering decisions](docs/DECISIONS.md),
 [evaluation methodology](docs/EVALUATION.md), and

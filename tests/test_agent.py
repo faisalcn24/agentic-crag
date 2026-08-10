@@ -594,7 +594,7 @@ def test_spreadsheet_lookup_uses_exact_row_without_synthesis(tmp_path, monkeypat
     assert result["agent"]["termination_reason"] == "answered"
 
 
-def test_spreadsheet_analysis_uses_validated_plan_and_duckdb(tmp_path, monkeypatch):
+def test_spreadsheet_aggregate_uses_standard_synthesis_path(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     called_nodes = []
     source = {
@@ -603,52 +603,12 @@ def test_spreadsheet_analysis_uses_validated_plan_and_duckdb(tmp_path, monkeypat
         "score": 0.9,
         "text": (
             "Document_Set: tiny-smoke | Retrieval_Time_ms: 180\n"
-            "Document_Set: demo-corpus | Retrieval_Time_ms: 240\n"
             "Document_Set: large-policy-pack | Retrieval_Time_ms: 410"
         ),
     }
 
     def complete(_prompt, node, _timeout):
         called_nodes.append(node)
-        assert node == "spreadsheet_plan"
-        return (
-            '{"operation":"maximum","value_column":"Retrieval_Time_ms",'
-            '"select_columns":["Document_Set","Retrieval_Time_ms"],'
-            '"filters":[],"sort_column":"","sort_direction":"desc",'
-            '"group_by":"","aggregate":"none","limit":100}',
-            10,
-        )
-
-    result = run_agent(
-        None,
-        "Which benchmark had the slowest retrieval time?",
-        runtime=AgentRuntime(retrieve=lambda *_args: [source], complete=complete),
-    )
-
-    assert called_nodes == ["spreadsheet_plan"]
-    assert "large-policy-pack" in result["answer"]
-    assert "410 ms" in result["answer"]
-    assert "[benchmarks.xlsx-Indexing Benchmarks]" in result["answer"]
-    assert result["sources"][0]["text"] == (
-        "Document_Set: large-policy-pack | Retrieval_Time_ms: 410"
-    )
-
-
-def test_invalid_spreadsheet_plan_fails_closed(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
-    source = {
-        "filename": "benchmarks.xlsx-Indexing Benchmarks",
-        "type": "xlsx",
-        "score": 0.9,
-        "text": (
-            "Document_Set: tiny-smoke | Retrieval_Time_ms: 180\n"
-            "Document_Set: large-policy-pack | Retrieval_Time_ms: 410"
-        ),
-    }
-
-    def complete(_prompt, node, _timeout):
-        if node == "spreadsheet_plan":
-            return "not valid JSON", 10
         assert node == "synthesis"
         return "The answer is not present in the provided documents.", 10
 
@@ -661,6 +621,7 @@ def test_invalid_spreadsheet_plan_fails_closed(tmp_path, monkeypatch):
         ),
     )
 
+    assert called_nodes == ["synthesis"]
     assert result["answer"] == "The answer is not present in the provided documents."
     assert result["agent"]["confidence"] == "low"
     assert result["agent"]["termination_reason"] == "abstained"

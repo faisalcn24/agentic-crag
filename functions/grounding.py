@@ -476,6 +476,54 @@ def extract_structured_answer(
     return None
 
 
+def extract_spreadsheet_lookup(
+    question: str, sources: list[dict[str, Any]]
+) -> str | None:
+    """Answer an unambiguous field lookup from one retrieved spreadsheet row."""
+    columns = _spreadsheet_columns(sources)
+    fields = _requested_spreadsheet_fields(question, columns)
+    if not fields:
+        return None
+
+    question_tokens = _spreadsheet_lookup_tokens(question)
+    candidates: list[tuple[int, str, dict[str, str]]] = []
+    for source in sources:
+        for row in _spreadsheet_rows(source):
+            if not all(field in row for field in fields):
+                continue
+            matching_tokens = question_tokens & _spreadsheet_lookup_tokens(
+                " ".join(row.values())
+            )
+            candidates.append(
+                (
+                    sum(
+                        3 if any(character.isdigit() for character in token) else 1
+                        for token in matching_tokens
+                    ),
+                    source.get("filename", "unknown"),
+                    row,
+                )
+            )
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if candidates[0][0] == 0 or (
+        len(candidates) > 1 and candidates[0][0] == candidates[1][0]
+    ):
+        return None
+
+    _, filename, row = candidates[0]
+    values = [_format_spreadsheet_value(field, row[field]) for field in fields]
+    if len(values) == 1:
+        return f"{values[0]} [{filename}]"
+    parts = [
+        f"{_spreadsheet_column_label(field).title()}: {value}"
+        for field, value in zip(fields, values, strict=True)
+    ]
+    return f"{'; '.join(parts)} [{filename}]"
+
+
 def extract_source_summary(
     question: str, sources: list[dict[str, Any]]
 ) -> str | None:
@@ -813,6 +861,94 @@ def _labeled_fields(source: dict[str, Any]) -> list[tuple[str, str]]:
         if value:
             fields.append((label, value))
     return fields
+
+
+def _spreadsheet_columns(sources: list[dict[str, Any]]) -> list[str]:
+    columns: list[str] = []
+    for source in sources:
+        for row in _spreadsheet_rows(source):
+            for column in row:
+                if column not in columns:
+                    columns.append(column)
+    return columns
+
+
+def _spreadsheet_rows(source: dict[str, Any]) -> list[dict[str, str]]:
+    if source.get("type") != "xlsx":
+        return []
+    rows = []
+    seen = set()
+    for line in source.get("text", "").splitlines():
+        row = _parse_spreadsheet_row(line)
+        marker = tuple(row.items())
+        if row and marker not in seen:
+            rows.append(row)
+            seen.add(marker)
+    return rows
+
+
+def _parse_spreadsheet_row(line: str) -> dict[str, str]:
+    if " | " not in line:
+        return {}
+    cells = [cell.split(": ", 1) for cell in line.split(" | ")]
+    if any(len(cell) != 2 for cell in cells):
+        return {}
+    return {key.strip(): value.strip() for key, value in cells}
+
+
+def _requested_spreadsheet_fields(question: str, columns: list[str]) -> list[str]:
+    question_tokens = _spreadsheet_lookup_tokens(question)
+    return [
+        column
+        for column in columns
+        if (
+            label_tokens := _spreadsheet_lookup_tokens(
+                _spreadsheet_column_label(column)
+            )
+        )
+        and label_tokens <= question_tokens
+    ]
+
+
+def _spreadsheet_lookup_tokens(text: str) -> set[str]:
+    stop_words = {
+        "a",
+        "and",
+        "at",
+        "did",
+        "for",
+        "how",
+        "is",
+        "on",
+        "the",
+        "to",
+        "was",
+        "what",
+        "which",
+    }
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.casefold())
+        if token not in stop_words
+    }
+
+
+def _spreadsheet_column_label(column: str) -> str:
+    parts = column.replace("_", " ").split()
+    if parts and parts[-1].casefold() in {"usd", "ms", "seconds"}:
+        parts.pop()
+    return " ".join(parts).casefold()
+
+
+def _format_spreadsheet_value(column: str, value: Any) -> str:
+    unit = column.rsplit("_", 1)[-1].casefold()
+    if unit == "usd":
+        return f"${value}"
+    if unit == "ms":
+        return f"{value} ms"
+    if unit == "seconds":
+        return f"{value} seconds"
+    return str(value)
 
 
 def _field_role(label: str) -> str:

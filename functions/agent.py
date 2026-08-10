@@ -17,6 +17,7 @@ from .grounding import (
     extract_collection_overview,
     extract_grounded_sentence,
     extract_source_overview,
+    extract_spreadsheet_lookup,
     extract_structured_answer,
     find_grounded_evidence,
     ground_conversational_answer,
@@ -40,14 +41,6 @@ from .multihop import (
     is_multi_hop_question,
     sentence_decomposition,
     validate_decomposition,
-)
-from .spreadsheet import (
-    answer_spreadsheet_lookup,
-    execute_spreadsheet_plan,
-    format_spreadsheet_answer,
-    is_spreadsheet_analysis_question,
-    spreadsheet_plan_prompt,
-    validate_spreadsheet_plan,
 )
 from .telemetry import log_query_result
 
@@ -670,23 +663,9 @@ def _run_workflow(
                 "confidence": state.get("confidence", "low"),
                 "termination_reason": reason or "answered",
             }
-        if is_spreadsheet_analysis_question(state["question"], safe_sources):
-            plan_prompt = spreadsheet_plan_prompt(state["question"], safe_sources)
-            text, tokens, _failure = complete_node(
-                state, plan_prompt, "spreadsheet_plan", 512
-            )
-            data = _json_object(text or "")
-            plan = validate_spreadsheet_plan(data, safe_sources)
-            result = execute_spreadsheet_plan(safe_sources, plan) if plan else None
-            if result:
-                return {
-                    "answer": prefix + format_spreadsheet_answer(result),
-                    "sources": [result["evidence"]],
-                    "total_tokens": state["total_tokens"] + tokens,
-                    "confidence": "high",
-                    "termination_reason": reason or "answered",
-                }
-        spreadsheet_answer = answer_spreadsheet_lookup(state["question"], safe_sources)
+        spreadsheet_answer = extract_spreadsheet_lookup(
+            state["question"], safe_sources
+        )
         if spreadsheet_answer:
             return {
                 "answer": prefix + spreadsheet_answer,

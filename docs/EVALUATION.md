@@ -2,7 +2,7 @@
 
 ## Current status
 
-The current generalized runtime passes **140 default tests with 2 optional live
+The current generalized runtime passes **128 default tests with 2 optional live
 checks skipped**. The optional checks load the real reranker and Ollama and run
 only when `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1`; they were not included in the
 latest default verification.
@@ -71,12 +71,14 @@ has provider-contract coverage only; provider parity requires its own live run.
 ## What automated tests cover
 
 - local OCR for generated image and scanned-PDF text;
+- persistent Chroma collection creation, reload, deletion, and preservation of
+  multi-file nodes for keyword fusion;
 - hybrid BM25/vector fusion, reranking, and exact identifiers;
 - claim grounding, citation rebuilding, and abstention;
 - cited-source filtering, document grouping, citation/source alignment, and the
   separation of supporting evidence from scored retrieval diagnostics;
 - bounded decomposition, quote verification, one correction, and terminal failure;
-- validated spreadsheet plans compiled to parameterized DuckDB SQL;
+- XLSX parsing, sheet provenance, relevant-row excerpting, and exact row lookup;
 - API upload rules, MCP tools, telemetry, and provider request schemas.
 
 ## Known limits

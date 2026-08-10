@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -39,6 +40,7 @@ from .grounding import (
     extract_collection_overview,
     extract_source_overview,
     extract_grounded_sentence,
+    extract_spreadsheet_lookup,
     extract_structured_answer,
     find_answer_supporting_passages,
     ground_conversational_answer,
@@ -47,15 +49,6 @@ from .grounding import (
     overview_covers_core_fields,
 )
 from .multihop import DECOMPOSITION_SCHEMA
-from .spreadsheet import (
-    SPREADSHEET_PLAN_SCHEMA,
-    answer_spreadsheet_lookup,
-    execute_spreadsheet_plan,
-    format_spreadsheet_answer,
-    is_spreadsheet_analysis_question,
-    spreadsheet_plan_prompt,
-    validate_spreadsheet_plan,
-)
 
 
 DEFAULT_STORAGE_DIR = Path.home() / ".agentic_crag_data"
@@ -98,7 +91,6 @@ STRUCTURED_OUTPUT_SCHEMAS = {
         "required": ["answer"],
         "additionalProperties": False,
     },
-    "spreadsheet_plan": SPREADSHEET_PLAN_SCHEMA,
     "decomposition": DECOMPOSITION_SCHEMA,
     "evidence_coverage": {
         "type": "object",
@@ -166,7 +158,6 @@ SYSTEM_PROMPT = (
     "When comparing documents, identify differences and cite which version contains each detail. "
     "For spreadsheets, report values exactly as they appear, match every requested label and value from the same "
     "row, and do not substitute a nearby row or field. "
-    "For calculations, show the raw figures and working. "
     "For multi-part questions, answer every requested part using context directly relevant to that part. "
     "Do not contradict your own conclusion or add a second interpretation. "
     "If the retrieved context does not contain the answer, return exactly: "
@@ -213,6 +204,10 @@ def get_uploads_dir() -> Path:
 
 def get_indexes_dir() -> Path:
     return get_storage_dir() / "indexes"
+
+
+def get_chroma_dir() -> Path:
+    return get_storage_dir() / "chroma"
 
 
 def get_registry_file() -> Path:
@@ -275,7 +270,8 @@ def load_document_file(filepath: str | Path) -> list[dict]:
 
 def build_index(raw_docs: list[dict], index_id: str):
     setup_embeddings()
-    index_dir = get_indexes_dir() / sanitize_index_id(index_id)
+    index_id = sanitize_index_id(index_id)
+    index_dir = get_indexes_dir() / index_id
     if index_dir.exists():
         shutil.rmtree(index_dir)
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -284,7 +280,15 @@ def build_index(raw_docs: list[dict], index_id: str):
     if not nodes:
         raise ValueError("No readable document text found to index")
 
-    index = VectorStoreIndex(nodes, show_progress=True)
+    storage = StorageContext.from_defaults(
+        vector_store=_chroma_vector_store(index_id, recreate=True)
+    )
+    index = VectorStoreIndex(
+        nodes,
+        storage_context=storage,
+        store_nodes_override=True,
+        show_progress=True,
+    )
     index.storage_context.persist(persist_dir=str(index_dir))
     with _runtime_lock:
         previous = _loaded_indexes.get(str(index_dir.resolve()))
@@ -299,7 +303,8 @@ def build_index(raw_docs: list[dict], index_id: str):
 
 def load_index(index_id: str):
     setup_embeddings()
-    index_dir = get_indexes_dir() / sanitize_index_id(index_id)
+    index_id = sanitize_index_id(index_id)
+    index_dir = get_indexes_dir() / index_id
     cache_key = str(index_dir.resolve())
     signature = index_dir.stat().st_mtime_ns
     with _runtime_lock:
@@ -308,7 +313,10 @@ def load_index(index_id: str):
             return cached[1]
         if cached:
             _keyword_indexes.pop(cached[1], None)
-        storage = StorageContext.from_defaults(persist_dir=str(index_dir))
+        storage = StorageContext.from_defaults(
+            persist_dir=str(index_dir),
+            vector_store=_chroma_vector_store(index_id),
+        )
         index = load_index_from_storage(storage)
         _loaded_indexes[cache_key] = (signature, index)
         return index
@@ -316,11 +324,13 @@ def load_index(index_id: str):
 
 def remove_index(index_id: str) -> bool:
     try:
-        index_dir = get_indexes_dir() / sanitize_index_id(index_id)
+        index_id = sanitize_index_id(index_id)
+        index_dir = get_indexes_dir() / index_id
         with _runtime_lock:
             cached = _loaded_indexes.pop(str(index_dir.resolve()), None)
             if cached:
                 _keyword_indexes.pop(cached[1], None)
+        _delete_chroma_collection(index_id)
         if index_dir.exists():
             shutil.rmtree(index_dir, ignore_errors=True)
         registry = load_registry()
@@ -350,6 +360,60 @@ _embedding_model = None
 _ocr_engine = None
 _loaded_indexes: dict[str, tuple[int, Any]] = {}
 _keyword_indexes: WeakKeyDictionary[Any, _KeywordCorpus] = WeakKeyDictionary()
+
+
+def _chroma_client():
+    """Create a local persistent Chroma client without eager startup imports."""
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+
+    chroma_dir = get_chroma_dir()
+    chroma_dir.mkdir(parents=True, exist_ok=True)
+    return chromadb.PersistentClient(
+        path=str(chroma_dir),
+        settings=ChromaSettings(anonymized_telemetry=False),
+    )
+
+
+def _chroma_collection_name(index_id: str) -> str:
+    safe_id = sanitize_index_id(index_id)
+    digest = hashlib.sha256(safe_id.encode("utf-8")).hexdigest()[:32]
+    return f"agentic-crag-{digest}"
+
+
+def _chroma_vector_store(index_id: str, *, recreate: bool = False):
+    from chromadb.errors import NotFoundError
+    from llama_index.vector_stores.chroma import ChromaVectorStore
+
+    client = _chroma_client()
+    collection_name = _chroma_collection_name(index_id)
+    if recreate:
+        _delete_chroma_collection(index_id, client=client)
+        collection = client.create_collection(
+            collection_name,
+            metadata={"index_id": sanitize_index_id(index_id)},
+            configuration={"hnsw": {"space": "cosine"}},
+            embedding_function=None,
+        )
+    else:
+        try:
+            collection = client.get_collection(
+                collection_name, embedding_function=None
+            )
+        except NotFoundError as exc:
+            raise RuntimeError(
+                f"Collection '{sanitize_index_id(index_id)}' uses a legacy vector "
+                "index; recreate it to build the Chroma store"
+            ) from exc
+    return ChromaVectorStore(chroma_collection=collection)
+
+
+def _delete_chroma_collection(index_id: str, *, client=None) -> None:
+    client = client or _chroma_client()
+    collection_name = _chroma_collection_name(index_id)
+    existing = {collection.name for collection in client.list_collections()}
+    if collection_name in existing:
+        client.delete_collection(collection_name)
 
 
 def setup_embeddings() -> None:
@@ -409,7 +473,7 @@ def call_model(
             256
             if node == "planner"
             else 512
-            if node in {"spreadsheet_plan", "decomposition", "corrective_queries"}
+            if node in {"decomposition", "corrective_queries"}
             else 1024
         ),
     }
@@ -474,9 +538,7 @@ def ask_index_with_sources(
         else None
     )
     if answer is None:
-        answer = _spreadsheet_answer(message, sources)
-    if answer is None:
-        answer = answer_spreadsheet_lookup(message, sources)
+        answer = extract_spreadsheet_lookup(message, sources)
     if answer is None and answer_intent != "overview":
         answer = extract_structured_answer(message, sources)
     if answer is None and answer_intent != "overview":
@@ -690,25 +752,6 @@ def _fallback_conversation_query(message: str, history: list[dict]) -> str:
         "",
     )
     return f"{last_user} {message}".strip()
-
-
-def _spreadsheet_answer(question: str, sources: list[dict[str, Any]]) -> str | None:
-    if not is_spreadsheet_analysis_question(question, sources):
-        return None
-    text, _ = call_model(
-        spreadsheet_plan_prompt(question, sources),
-        node="spreadsheet_plan",
-        timeout=30.0,
-    )
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        return None
-    try:
-        plan = validate_spreadsheet_plan(json.loads(match.group(0)), sources)
-    except json.JSONDecodeError:
-        return None
-    result = execute_spreadsheet_plan(sources, plan) if plan else None
-    return format_spreadsheet_answer(result) if result else None
 
 
 def _answer_prompt(
@@ -958,8 +1001,6 @@ def _spreadsheet_excerpt(text: str, query: str, max_rows: int = 4) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     headers = [line for line in lines if " | " not in line]
     rows = [line for line in lines if " | " in line]
-    if is_spreadsheet_analysis_question(query, [{"type": "xlsx"}]):
-        return text
     if len(rows) <= max_rows:
         return text
     query_tokens = set(_search_tokens(query))

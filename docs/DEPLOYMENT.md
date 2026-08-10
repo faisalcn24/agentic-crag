@@ -1,7 +1,7 @@
 # AWS deployment
 
 The API can run on one Ubuntu EC2 instance. FastAPI, document parsing,
-embeddings, persisted vector indexes, retrieval, and the default Ollama
+embeddings, embedded Chroma vector storage, retrieval, and the default Ollama
 `llama3.2:3b` model all run on the instance. Groq remains optional; when
 enabled, questions and retrieved excerpts leave the instance.
 
@@ -11,7 +11,7 @@ enabled, questions and retrieved excerpts leave the instance.
 public :80 -> Nginx -> FastAPI 127.0.0.1:8000
                          |
                          +-> Ollama 127.0.0.1:11434
-                         +-> /opt/agentic-crag/data
+                         +-> /opt/agentic-crag/data (uploads, metadata, Chroma)
 ```
 
 The deployment uses `agentic-crag-api.service`, Nginx, and Ollama. It does not install a web UI or automatic retention service.
