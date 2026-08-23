@@ -11,6 +11,16 @@ embeddings, retrieval, and storage remain local. Generation uses local Ollama by
 default. Groq is an explicit hosted option that receives only the question and
 retrieved excerpts.
 
+## Interface
+
+![Agentic CRAG answering a multi-part deployment question with cited supporting passages](pics/crag_docs.png)
+
+*Structured answers grounded in cited document passages.*
+
+![Agentic CRAG answering questions about an incident report extracted from an image](pics/crag_png.png)
+
+*Local OCR turns uploaded images into searchable, cited evidence.*
+
 ## What stands out
 
 - **Grounded, inspectable answers:** unsupported claims are removed, missing
@@ -24,7 +34,7 @@ retrieved excerpts.
   exact source quotes, and receive at most one corrective retrieval per missing
   part—never an open-ended agent loop.
 - **Document support:** local OCR handles images and scanned PDFs; openpyxl turns
-  XLSX sheets into labeled, retrieval-ready text with sheet metadata intact.
+  each nonempty XLSX row into a labeled node with workbook, sheet, and row provenance.
 - **Three interfaces:** a dependency-free web UI, FastAPI endpoints, and MCP tools
   for Claude Code or another compatible host.
 
@@ -97,12 +107,27 @@ python -m compileall -q functions tests evals scripts
 python -m pip check
 ```
 
-The current generalized runtime passes **128 default tests with 2 optional live
+The current generalized runtime passes **189 default tests with 2 optional live
 checks skipped**. Set `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1` to opt into the real
-reranker and Ollama checks. A retained 60-question corpus review is available as
-[historical evaluation evidence](docs/EVALUATION.md), but it predates the removal
-of corpus-specific shortcuts and is not presented as a current general-data
-accuracy score.
+reranker and Ollama checks.
+
+The current [Phase 0 evaluation](docs/EVALUATION.md) contains independently graded,
+same-stack 240-trial corrective-ON runs for `llama3.2:3b` and `qwen3:8b` at
+temperature 0:
+
+| Model | Answer rate | Conditional correctness | Strict correctness | Multi-hop conditional | Mean / P95 latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Qwen3 8B | 96.0% | 83.3% | 80.0% | 66.7% | 7.78 s / 12.52 s |
+| Llama 3.2 3B | 96.0% | 83.3% | 80.0% | 66.7% | 7.80 s / 12.39 s |
+
+Neither model passes the release contract: aggregate conditional correctness is
+below 85%, and multi-hop conditional correctness is below 75%. Both achieved 100%
+faithfulness and citation accuracy on returned answers, with zero deadline
+fallbacks. Llama remains the default because it matches Qwen's measured quality
+with a smaller model footprint and 2.8% lower recorded token use, not because of a
+quality or latency advantage. The report keeps answer rate, conditional
+correctness, and strict correctness together, plus separate false-abstention and
+deadline-fallback rates.
 
 ## Boundaries
 
