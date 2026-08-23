@@ -111,23 +111,18 @@ The current generalized runtime passes **189 default tests with 2 optional live
 checks skipped**. Set `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1` to opt into the real
 reranker and Ollama checks.
 
-The current [Phase 0 evaluation](docs/EVALUATION.md) contains independently graded,
-same-stack 240-trial corrective-ON runs for `llama3.2:3b` and `qwen3:8b` at
-temperature 0:
+The current [Phase 0 evaluation](docs/EVALUATION.md) contains an independently
+graded 240-trial corrective-ON run for the selected `llama3.2:3b` model at
+temperature 0. Across the 150 answerable trials, it achieved a 96.0% answer rate,
+83.3% conditional correctness, and 80.0% strict correctness. Multi-hop conditional
+and strict correctness were both 66.7%.
 
-| Model | Answer rate | Conditional correctness | Strict correctness | Multi-hop conditional | Mean / P95 latency |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Qwen3 8B | 96.0% | 83.3% | 80.0% | 66.7% | 7.78 s / 12.52 s |
-| Llama 3.2 3B | 96.0% | 83.3% | 80.0% | 66.7% | 7.80 s / 12.39 s |
-
-Neither model passes the release contract: aggregate conditional correctness is
-below 85%, and multi-hop conditional correctness is below 75%. Both achieved 100%
-faithfulness and citation accuracy on returned answers, with zero deadline
-fallbacks. Llama remains the default because it matches Qwen's measured quality
-with a smaller model footprint and 2.8% lower recorded token use, not because of a
-quality or latency advantage. The report keeps answer rate, conditional
-correctness, and strict correctness together, plus separate false-abstention and
-deadline-fallback rates.
+The model does not yet pass the release contract: aggregate conditional
+correctness is below 85%, and multi-hop conditional correctness is below 75%.
+Returned answers achieved 100% faithfulness and citation accuracy, with zero
+deadline fallbacks. Mean latency was 7.80 seconds and P95 latency was 12.39
+seconds. The report keeps answer rate, conditional correctness, and strict
+correctness together, plus separate false-abstention and deadline-fallback rates.
 
 ## Boundaries
 
