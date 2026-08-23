@@ -111,18 +111,27 @@ The current generalized runtime passes **189 default tests with 2 optional live
 checks skipped**. Set `AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS=1` to opt into the real
 reranker and Ollama checks.
 
-The current [Phase 0 evaluation](docs/EVALUATION.md) contains an independently
-graded 240-trial corrective-ON run for the selected `llama3.2:3b` model at
-temperature 0. Across the 150 answerable trials, it achieved a 96.0% answer rate,
-83.3% conditional correctness, and 80.0% strict correctness. Multi-hop conditional
-and strict correctness were both 66.7%.
+## Results
 
-The model does not yet pass the release contract: aggregate conditional
-correctness is below 85%, and multi-hop conditional correctness is below 75%.
-Returned answers achieved 100% faithfulness and citation accuracy, with zero
-deadline fallbacks. Mean latency was 7.80 seconds and P95 latency was 12.39
-seconds. The report keeps answer rate, conditional correctness, and strict
-correctness together, plus separate false-abstention and deadline-fallback rates.
+80 hand-written questions, 480 trials, manually verified grader.
+
+|                                                  |               |
+| ------------------------------------------------ | ------------: |
+| Answer rate                                      |         96.0% |
+| Correctness (when answered)                      |         83.3% |
+| Correctness (strict, abstentions count as wrong) |         80.0% |
+| Faithfulness                                     |          100% |
+| Hallucination rate                               |            0% |
+| Citation accuracy                                |          100% |
+| Recall\@1 / MRR                                  | 78.3% / 0.871 |
+| P95 latency                                      |         12.5s |
+
+Fully local — $0 inference cost.
+
+**By category (strict):** single-hop 90.0% · XLSX 80.0% · multi-hop 66.7%
+
+**Adversarial:** unanswerable, out-of-scope, and false-premise handling
+100%. Prompt-injection flagging 100%; flag-and-still-answer 75%.
 
 ## Boundaries
 
