@@ -1,32 +1,42 @@
-# Raw evaluation results
+# Evaluation result artifacts
 
-`evals/run_evals.py` writes timestamped JSON files here. Each file contains the
-generated answer, expected answer, returned sources, citations, provenance metrics,
-prompt-injection flags, and agent termination data. For completed answers, returned
-sources are cited supporting evidence grouped by document. For abstentions, they
-are closest retrieval diagnostics.
+The current valid scorecards are the independently graded, same-stack,
+corrective-ON runs completed on 18 August 2026:
 
-The retained complete directly reviewed comparison is
-`eval-20260803T202217Z.json`. Its top-level `manual_review` object records the
-direct inspection and acceptance summary after OCR, hybrid retrieval, and the
-initial bounded-correction rollout. It predates removal of corpus-specific answer
-shortcuts and is historical evidence, not a current accuracy claim. See
-`docs/EVALUATION.md`.
+- Qwen3 8B: `eval-raw-20260818T162900Z.json` and
+  `eval-scored-20260818T162900Z.json`
+- Llama 3.2 3B: `eval-raw-20260818T170047Z.json` and
+  `eval-scored-20260818T170047Z.json`
+- Injection fast loop: `eval-scored-20260818T155543Z.json`
 
-That historical file uses the former `expected_source_recall` metric over the
-top-k response. New runs use `expected_supporting_source_recall`,
-`citation_source_alignment`, and `supporting_evidence_contract`; do not compare the
-old source-recall percentage directly with these metrics.
+Each model ran all 80 cases three times. The resulting 480 trials use the same
+code, prompts, dataset, index, temperature, corrective mode, deadline, order, and
+deterministic grader. See `docs/EVALUATION.md` for the scorecard, baseline diff,
+and interpretation.
 
-Only this final reviewed comparison is retained; superseded smoke and
-intermediate runs are intentionally excluded.
+The pre-independent-grading artifacts and manual-review files remain invalidated
+audit history. The 14 August independently graded scorecards are now superseded by
+the injection-continuation rerun, but remain useful as the disclosed before-state.
 
-Generate a complete comparison with:
+`evals/run_evals.py` writes an append-only checkpoint, a raw result JSON, and an
+automatically scored JSON. Every trial contains the question, expected answer,
+actual answer, ranked retrieval trace, control trace, termination metadata,
+latency, token usage, and model fingerprint. Every grade records correctness,
+faithfulness, hallucination, citation accuracy, abstention behavior, retrieval
+metrics, and diagnostics.
 
-```bash
-python evals/run_evals.py --mode compare
+Collect a three-repeat run:
+
+```powershell
+python evals\run_evals.py --corrective on --repeats 3 `
+  --checkpoint evals\results\checkpoint-<model>-on-3x.jsonl
 ```
 
-These files are evidence for direct review, not automated correctness scores.
-The consolidated methodology and current verification status are in
-`docs/EVALUATION.md`.
+Resume a compatible checkpoint with `--resume`. Re-score a raw artifact with the
+current grader:
+
+```powershell
+python evals\run_evals.py --score-results <raw-result.json>
+```
+
+No manual-judgment file or separate judge model is used.

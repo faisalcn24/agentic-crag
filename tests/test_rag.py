@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,12 +12,53 @@ from functions import rag
 from functions.rag import load_document_file, load_documents
 
 
+def test_registry_updates_do_not_lose_concurrent_collections(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
+
+    def register(number: int) -> None:
+        rag.update_registry(
+            f"collection-{number}",
+            tmp_path / f"collection-{number}",
+            [{"filename": f"document-{number}.pdf", "type": "pdf"}],
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(register, range(16)))
+
+    assert set(rag.load_registry()) == {
+        f"collection-{number}" for number in range(16)
+    }
+
+
 def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
-    requests = []
+    groq_requests = []
+    ollama_requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "message": {
+                        "content": '{"query":"standalone","intent":"answer"}'
+                    },
+                    "prompt_eval_count": 4,
+                    "eval_count": 2,
+                }
+            ).encode()
+
+    def fake_urlopen(request, timeout):
+        ollama_requests.append((json.loads(request.data), timeout))
+        return FakeResponse()
 
     class FakeCompletions:
         def create(self, **request):
-            requests.append(request)
+            groq_requests.append(request)
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
@@ -35,6 +77,7 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
             chat=SimpleNamespace(completions=FakeCompletions())
         ),
     )
+    monkeypatch.setattr(rag, "urlopen", fake_urlopen)
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
     for provider in ("ollama", "groq"):
@@ -42,34 +85,36 @@ def test_agent_planner_requests_schema_from_both_providers(monkeypatch):
         text, _ = rag.call_model("plan this", node="planner")
         assert text == '{"query":"standalone","intent":"answer"}'
 
-    for request in requests:
-        response_format = request["response_format"]
-        assert response_format["type"] == "json_schema"
-        assert response_format["json_schema"]["strict"] is True
-        assert response_format["json_schema"]["schema"] == {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500,
-                },
-                "intent": {
-                    "type": "string",
-                    "enum": ["answer", "overview"],
-                },
-            },
-            "required": ["query", "intent"],
-            "additionalProperties": False,
-        }
+    expected_schema = rag.STRUCTURED_OUTPUT_SCHEMAS["planner"]
+    assert ollama_requests[0][0]["format"] == expected_schema
+    assert ollama_requests[0][0]["think"] is False
+    response_format = groq_requests[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"] == expected_schema
 
 
 def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
-    requests = []
+    groq_requests = []
+    ollama_requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"message":{"content":"{}"},"prompt_eval_count":1,"eval_count":1}'
+
+    def fake_urlopen(request, timeout):
+        ollama_requests.append(json.loads(request.data))
+        return FakeResponse()
 
     class FakeCompletions:
         def create(self, **request):
-            requests.append(request)
+            groq_requests.append(request)
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))],
                 usage=None,
@@ -82,6 +127,7 @@ def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
             chat=SimpleNamespace(completions=FakeCompletions())
         ),
     )
+    monkeypatch.setattr(rag, "urlopen", fake_urlopen)
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
 
     expected = []
@@ -91,8 +137,11 @@ def test_every_control_schema_is_requested_from_both_providers(monkeypatch):
             rag.call_model("control", node=node)
             expected.append((node, schema))
 
-    assert len(requests) == len(expected)
-    for request, (node, schema) in zip(requests, expected, strict=True):
+    count = len(rag.STRUCTURED_OUTPUT_SCHEMAS)
+    assert len(ollama_requests) == len(groq_requests) == count
+    for request, (_node, schema) in zip(ollama_requests, expected[:count], strict=True):
+        assert request["format"] == schema
+    for request, (node, schema) in zip(groq_requests, expected[count:], strict=True):
         value = request["response_format"]["json_schema"]
         assert value["name"] == f"agentic_crag_{node}"
         assert value["strict"] is True
@@ -131,6 +180,41 @@ def test_load_xlsx(tmp_path: Path):
     assert docs[0]["filename"] == "sample.xlsx-Budget"
     assert docs[0]["type"] == "xlsx"
     assert "Item: Hosting | Amount: 25" in docs[0]["text"]
+    assert docs[0]["rows"] == [
+        {"row": 2, "text": "Item: Hosting | Amount: 25"}
+    ]
+
+
+def test_xlsx_builds_one_node_per_row_with_structured_provenance(tmp_path: Path):
+    path = tmp_path / "sample.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Budget"
+    sheet.append(["Item", "Amount"])
+    sheet.append(["Hosting", 25])
+    sheet.append(["Logging", 4])
+    workbook.save(path)
+
+    nodes = rag._build_nodes(load_document_file(path))
+
+    assert len(nodes) == 2
+    assert [node.metadata["row"] for node in nodes] == [2, 3]
+    assert all(node.metadata["workbook"] == "sample.xlsx" for node in nodes)
+    assert all(node.metadata["sheet"] == "Budget" for node in nodes)
+    assert "Item: Hosting | Amount: 25" in nodes[0].get_content()
+
+
+def test_single_column_spreadsheet_row_can_be_looked_up():
+    source = {
+        "filename": "status.xlsx-Data",
+        "type": "xlsx",
+        "text": "Document filename: status.xlsx\nSheet: Data\nStatus: Ready",
+    }
+
+    assert (
+        rag.extract_spreadsheet_lookup("What is the status?", [source])
+        == "Ready [status.xlsx-Data]"
+    )
 
 
 def test_load_image_uses_ocr(tmp_path: Path, monkeypatch):
@@ -328,7 +412,7 @@ def test_remove_index_deletes_its_chroma_collection(tmp_path: Path, monkeypatch)
     }
 
 
-def test_answer_entrypoint_uses_shared_retrieval_and_model_call(monkeypatch):
+def test_answer_entrypoint_skips_model_when_retrieval_is_empty(monkeypatch):
     calls = []
     monkeypatch.setattr(
         rag,
@@ -346,10 +430,7 @@ def test_answer_entrypoint_uses_shared_retrieval_and_model_call(monkeypatch):
 
     result = rag.ask_index_with_sources(object(), "Unknown fact?")
 
-    assert calls == [
-        ("retrieve", "Unknown fact?", rag.RERANK_TOP_N),
-        ("complete", "synthesis", 30.0),
-    ]
+    assert calls == [("retrieve", "Unknown fact?", rag.RERANK_TOP_N)]
     assert result["answer"] == "The answer is not present in the provided documents."
 
 
@@ -647,6 +728,48 @@ def test_spreadsheet_lookup_uses_requested_latency_field():
     )
 
 
+def test_spreadsheet_lookup_lists_identifiers_filtered_by_status():
+    sources = [
+        {
+            "filename": "risks.xlsx-Risk Register",
+            "type": "xlsx",
+            "text": text,
+        }
+        for text in (
+            "Risk_ID: R-005 | Risk: Exact IDs can be missed | Status: Open",
+            "Risk_ID: R-006 | Risk: Rows can be omitted | Status: Monitoring",
+            "Risk_ID: R-008 | Risk: No authentication | Status: Open",
+        )
+    ]
+
+    answer = rag.extract_spreadsheet_lookup("List the open risks.", sources)
+
+    assert "R-005 has status Open" in answer
+    assert "R-008 has status Open" in answer
+    assert "R-006" not in answer
+
+
+def test_spreadsheet_lookup_does_not_intercept_analytics_or_false_premises():
+    source = {
+        "filename": "benchmarks.xlsx-Data",
+        "type": "xlsx",
+        "text": (
+            "Name: small | Retrieval_Time_ms: 180 | Budget_USD: 75 | Actual_USD: 0\n"
+            "Name: large | Retrieval_Time_ms: 410 | Budget_USD: 90 | Actual_USD: 20"
+        ),
+    }
+
+    assert rag.extract_spreadsheet_lookup(
+        "Which benchmark had the slowest retrieval time?", [source]
+    ) is None
+    assert rag.extract_spreadsheet_lookup(
+        "How much did spending exceed its $75 budget?", [source]
+    ) is None
+    assert rag.extract_spreadsheet_lookup(
+        "How much faster was small retrieval than large retrieval?", [source]
+    ) is None
+
+
 def test_formatted_spreadsheet_source_preserves_rows_and_full_sheet():
     class FakeNode:
         metadata = {"filename": "sheet.xlsx-Data", "type": "xlsx"}
@@ -761,3 +884,103 @@ def test_spreadsheet_excerpt_keeps_rows_relevant_to_query():
 
     assert "Quarter: Q3 | Category: Groq API | Budget_USD: 75" in excerpt
     assert excerpt.count("Quarter:") == 2
+
+
+def test_spreadsheet_lookup_parses_each_source_once(monkeypatch):
+    from functions import grounding
+
+    sources = [
+        {"filename": "budget.xlsx", "type": "xlsx", "text": "Quarter: Q1 | Budget_USD: 40"},
+        {"filename": "budget.xlsx", "type": "xlsx", "text": "Quarter: Q3 | Budget_USD: 75"},
+    ]
+    original = grounding._spreadsheet_rows
+    calls = []
+    def rows(source):
+        calls.append(source)
+        return original(source)
+    monkeypatch.setattr(grounding, "_spreadsheet_rows", rows)
+    assert grounding.extract_spreadsheet_lookup("What is the Q3 budget?", sources) == "$75 [budget.xlsx]"
+    assert calls == sources
+
+
+def test_keyword_corpus_extracts_each_nodes_text_once(monkeypatch):
+    calls = []
+    class Node:
+        def __init__(self, text):
+            self.text = text
+        def get_content(self, metadata_mode):
+            calls.append(self)
+            return self.text
+    class Index:
+        docstore = SimpleNamespace(docs={str(i): Node(text) for i, text in enumerate(["Alpha alpha", " ", "Beta"])})
+    monkeypatch.setattr(rag, "_keyword_indexes", {})
+    index = Index()
+    corpus = rag._get_keyword_corpus(index)
+    assert calls == list(index.docstore.docs.values())
+    assert [dict(counts) for counts in corpus.token_counts] == [{"alpha": 2}, {"beta": 1}]
+    assert corpus.average_length == 1.5
+    assert rag._get_keyword_corpus(index) is corpus
+    assert len(calls) == 3
+
+
+def test_evidence_tokenization_reuses_overlapping_spans(monkeypatch):
+    from functions import grounding
+
+    text = "Alpha stores reports. Beta reads reports. Gamma exports reports."
+    original = grounding._terms
+    calls = []
+    def terms(value):
+        calls.append(value)
+        return original(value)
+    monkeypatch.setattr(grounding, "_terms", terms)
+    sources = [{"filename": name, "text": text, "type": "pdf"} for name in ("a.pdf", "b.pdf")]
+    evidence = grounding._evidence_sentences(sources, include_spreadsheets=True)
+    assert len(evidence) == 12
+    assert {item.filename for item in evidence} == {"a.pdf", "b.pdf"}
+    assert len(calls) == len(set(calls)) == 6
+    assert evidence[0].context_terms == evidence[0].terms
+    assert evidence[1].context_terms == evidence[0].terms | evidence[1].terms
+
+
+def test_sheet_rows_streams_input_and_preserves_row_numbers():
+    class Rows:
+        def __init__(self):
+            self.rows = iter([("ID", None, "Value"), ("A", "ignored", 0), (None, None, None), ("B", None, False)])
+        def __iter__(self):
+            return self
+        def __next__(self):
+            return next(self.rows)
+        def __length_hint__(self):
+            raise AssertionError("Do not materialize all worksheet rows")
+    sheet = SimpleNamespace(iter_rows=lambda **_: Rows())
+    assert rag._sheet_rows(sheet) == [
+        {"row": 2, "text": "ID: A | Value: 0"},
+        {"row": 4, "text": "ID: B | Value: False"},
+    ]
+
+
+def test_shared_tokenizer_preserves_identifier_and_word_matching():
+    from functions import grounding
+
+    text = "use alpha_beta and solar-panel at 1.2"
+    assert grounding._ordered_terms(text) == [
+        "use", "alpha_beta", "alpha", "beta", "solar", "panel", "1.2",
+    ]
+    assert grounding._anchors(text) == {"alpha_beta", "1.2"}
+
+
+def test_structured_field_aliases_keep_requested_values_and_headings():
+    from functions import grounding
+
+    source = {
+        "filename": "incident.pdf", "type": "pdf",
+        "text": "Incident ID: ZX-123 Root Cause: stale cache. Mitigation: restart service. State: closed.",
+    }
+    result = grounding.extract_structured_answer(
+        "For ZX-123, why did it fail and how was it mitigated?", [source],
+    )
+    assert result == (
+        "For incident ZX-123, the report says [incident.pdf]:\n"
+        "- What caused it: stale cache.\n"
+        "- How it was resolved: restart service."
+    )

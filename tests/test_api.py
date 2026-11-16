@@ -28,7 +28,7 @@ def test_root_serves_graphical_chat_page():
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "AGENTIC CRAG" in response.text
-    assert "fetch(`/${elements.mode.value}`" in response.text
+    assert "requestJson(`/${elements.mode.value}`" in response.text
     assert "SOURCE_PREVIEW_LENGTH = 300" in response.text
     assert 'toggle.textContent = "Show more"' in response.text
     assert 'toggle.textContent = expanded ? "Show more" : "Show less"' in response.text
@@ -53,6 +53,7 @@ def test_root_serves_graphical_chat_page():
     assert "Â·" not in response.text
     assert "supporting ? \"\" : `relevance ${source.score}`" in response.text
     assert "source_filenames" in response.text
+    assert "payload.agent || payload" in response.text
 
 
 def test_upload_allowlist_accepts_documents_and_images():
@@ -89,3 +90,12 @@ def test_upload_limit_rejects_oversized_file(monkeypatch):
         validate_upload_metadata([upload("large.pdf", "application/pdf", size=10)])
 
     assert exc_info.value.status_code == 413
+
+
+def test_upload_validation_rejects_duplicate_filenames():
+    with pytest.raises(HTTPException) as exc_info:
+        validate_upload_metadata(
+            [upload("report.pdf", "application/pdf"), upload("report.pdf", "application/pdf")]
+        )
+
+    assert exc_info.value.status_code == 400

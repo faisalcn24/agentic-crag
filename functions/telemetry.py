@@ -20,15 +20,18 @@ def telemetry_file() -> Path:
 
 def log_query_result(*, mode: str, iterations: int, latency_ms: float) -> None:
     path = telemetry_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "timestamp": datetime.now(UTC).isoformat(),
         "mode": mode,
         "iterations": iterations,
         "latency_ms": round(latency_ms, 3),
     }
-    with _write_lock, path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _write_lock, path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+    except OSError:
+        pass  # Metrics must never break a user query.
 
 
 def read_events() -> list[dict]:

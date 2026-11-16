@@ -1,0 +1,1 @@
+{"trial_id": "on:golden:multi-007:run-1", "metrics": {"ragas": {"context_precision": 0.688888888888889, "context_recall": 1.0, "faithfulness": null}, "deepeval": {"answer_correctness": null, "hallucination_rate": null, "citation_accuracy": null}, "custom": {"abstention_accuracy": null}}, "notes": ""}

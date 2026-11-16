@@ -9,11 +9,95 @@ from PIL import Image, ImageDraw, ImageFont
 
 from functions import rag
 from functions.agent import run_agent
-from functions.grounding import extract_grounded_sentence, find_grounded_evidence
+from functions.grounding import (
+    extract_grounded_sentence,
+    extract_structured_answer,
+    find_grounded_evidence,
+    ground_generated_answer,
+)
 
 
 RUN_LIVE_QUALITY_TESTS = os.getenv("AGENTIC_CRAG_RUN_LIVE_QUALITY_TESTS") == "1"
 ABSTENTION = "The answer is not present in the provided documents."
+
+
+def test_extractive_grounding_handles_size_and_passive_relation_questions():
+    sources = [
+        {
+            "filename": "runbook.docx",
+            "type": "docx",
+            "text": "A 2 GB swap file at /swapfile is recommended for small instances.",
+        },
+        {
+            "filename": "release.docx",
+            "type": "docx",
+            "text": (
+                "Collections built before a chunking or embedding change should be "
+                "rebuilt to use the current settings."
+            ),
+        },
+    ]
+
+    assert "2 GB swap file" in extract_grounded_sentence(
+        "How large is the swap file recommended for a small instance?", sources
+    )
+    assert "should be rebuilt" in extract_grounded_sentence(
+        "When should existing collections be rebuilt?", sources
+    )
+
+
+def test_identifier_lookup_returns_only_the_matching_requirement():
+    source = {
+        "filename": "requirements.docx",
+        "type": "docx",
+        "text": (
+            "Functional Requirements FR-005: Return source snippets. "
+            "FR-006: Expose a retrieval-only debugging endpoint. "
+            "FR-007: Warn users about external generation."
+        ),
+    }
+
+    assert extract_grounded_sentence("What does FR-006 require?", [source]) == (
+        "FR-006: Expose a retrieval-only debugging endpoint. [requirements.docx]"
+    )
+
+
+def test_email_address_does_not_request_resolution_fields():
+    sources = [
+        {
+            "filename": "incidents.xlsx-Log",
+            "type": "xlsx",
+            "text": "Incident_ID: I-001 | Resolution: Updated the network address",
+        }
+    ]
+
+    assert extract_structured_answer(
+        "What is the database administrator's email address?", sources
+    ) is None
+
+
+def test_supported_but_irrelevant_generated_claim_is_rejected():
+    sources = [
+        {
+            "filename": "requirements.docx",
+            "type": "docx",
+            "text": "FR-006 exposes a retrieval-only debugging endpoint.",
+        },
+        {
+            "filename": "benchmarks.xlsx-Data",
+            "type": "xlsx",
+            "text": (
+                "Document_Set: tiny-smoke | Retrieval_Time_ms: 180\n"
+                "Document_Set: large-policy-pack | Retrieval_Time_ms: 410"
+            ),
+        },
+    ]
+
+    assert ground_generated_answer(
+        "How much faster was tiny-smoke retrieval than large-policy-pack retrieval?",
+        "FR-006 exposes a retrieval-only debugging endpoint.",
+        sources,
+    ) == ABSTENTION
 
 
 def test_plural_documents_question_is_an_overview_request():
@@ -548,8 +632,8 @@ def test_live_rag_stays_grounded_with_entity_distractors(
 ):
     monkeypatch.setenv("AGENTIC_CRAG_STORAGE_DIR", str(tmp_path))
     monkeypatch.setenv("AGENTIC_CRAG_LLM_PROVIDER", "ollama")
-    monkeypatch.setenv("OLLAMA_MODEL", "llama3.2:3b")
-    monkeypatch.setenv("OLLAMA_PLANNER_MODEL", "llama3.2:3b")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
+    monkeypatch.setenv("OLLAMA_PLANNER_MODEL", "qwen3:8b")
 
     index = rag.build_index(
         [

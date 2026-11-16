@@ -16,6 +16,10 @@ git pull --ff-only
 echo "Updating Python dependencies..."
 ./venv/bin/pip install -r requirements.txt
 
+echo "Refreshing the local embedding and reranker model cache..."
+HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 ./venv/bin/python -c \
+  "from functions.rag import setup_embeddings, get_reranker; setup_embeddings(); get_reranker()"
+
 echo "Refreshing service and Nginx templates..."
 sudo cp deploy/agentic-crag-api.service /etc/systemd/system/
 sudo cp deploy/nginx-agentic-crag.conf /etc/nginx/sites-available/agentic-crag

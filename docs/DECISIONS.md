@@ -14,27 +14,47 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 - **Decision:** Continue using the existing local embedding model.
 - **Why:** Full documents remain on the host and existing indexes stay compatible.
-- **Rejected:** Hosted embeddings and a new vector database. Neither is needed for this corpus.
+- **Rejected:** Hosted embeddings or changing the embedding model solely as an
+  answer-quality workaround. D-024 separately records the persistent Chroma boundary.
 
 ## D-003: Retain format-aware chunking
 
-- **Decision:** Keep 500-token overlapping prose chunks and 4,000-token non-overlapping spreadsheet chunks.
-- **Why:** Spreadsheet headers and rows need to remain together; prose benefits from smaller retrieval units.
+- **Decision:** Keep 500-token overlapping prose chunks and index each nonempty
+  spreadsheet row as one labeled node with workbook, sheet, and row provenance.
+- **Why:** Prose benefits from smaller retrieval units, while row nodes prevent an
+  unrelated row in the same sheet-sized chunk from being presented as evidence.
 - **Rejected:** One chunk size for every format.
 
 ## D-004: Local Ollama is the default execution mode
 
-- **Decision:** Use `llama3.2:3b` through Ollama for query planning and answer synthesis. Groq remains selectable by the tester/operator.
-- **Why:** The default path keeps generation local while preserving the requested provider-testing option.
+- **Decision:** Use `llama3.2:3b` through Ollama for query planning and answer
+  synthesis. Call Ollama's native structured-output endpoint; when Qwen is selected
+  explicitly, disable its thinking mode inside the 30-second RAG path. Groq remains
+  selectable by the operator.
+- **Why:** The native endpoint honors JSON schemas while keeping generation local.
+  The valid same-stack decision in D-028 found tied strict correctness and a
+  material latency penalty for Qwen3 8B.
 - **Rejected for this scope:** End-user provider switching and model-routing cost optimization.
 
-## D-005: Pin evaluation inputs and review answers directly
+## D-005: Pin evaluation inputs and grade independent dimensions
 
-- **Decision:** Keep versioned JSONL datasets, save raw generated answers and the
-  evidence returned with each answer, and inspect every answer against the expected
-  answer and source text.
-- **Why:** Direct review makes failures understandable and avoids delegating acceptance to another model.
-- **Rejected:** Regenerating questions per run or using automated answer scores as current acceptance criteria. Automated scoring may be reconsidered later.
+- **Decision:** Keep versioned JSONL datasets, save raw generated answers and ranked
+  retrieval traces, run every case three times with corrective retrieval ON and OFF,
+  and grade answer correctness against `expected_answer`. Grade faithfulness against
+  retrieved chunk text and citation accuracy against the specifically cited source.
+- **Why:** Answer correctness, retrieval relevance, faithfulness, and citation
+  accuracy are different claims. Using selected evidence or copied judgments as a
+  proxy for correctness couples the grader to the controller and hides partial or
+  wrong-question answers.
+- **Metric guard:** Compute context precision independently within each retrieval
+  query leg, deduplicate identical chunks inside that leg, and use the frozen
+  `expected_source` labels for document-level relevance. Appending a corrective leg
+  to the initial global ranking would penalize it for call order rather than rank.
+- **Canary:** A deliberately wrong answer must score zero for correctness even when
+  the retrieved evidence supports that wrong answer. Unsupported claims and wrong
+  citations must make their respective grounding metrics less than one.
+- **Rejected:** Regenerating questions per run, delegating acceptance to the model
+  under test, or reusing one model's judgments for another model's identical output.
 
 ## D-006: Bound the retrieval workflow
 
@@ -49,9 +69,15 @@ Decisions are recorded before measurements so later results are not tuned to a p
   agent cases through loop safeguards instead of normal answers. A single
   corrective pass addresses incomplete retrieval without recreating that loop.
 - **Rejected:** Model-controlled repeated retrieval and an open-ended autonomous loop.
-- **Implementation guard:** Generic exact evidence matches run before model
-  coverage checks. Invalid corrective terms are rejected and receive one bounded
-  query derived from the full missing sub-question, never another planning call.
+- **Implementation guard:** Coverage control output must select one exact quote per
+  obligation, and application code verifies that quote against the named retrieved
+  source. Reliable multi-identifier, bounded-version, and explicit subject-relation
+  syntax uses deterministic atomic decomposition. A corrective query may use exact
+  terms from its failed leg or another leg's verified quote so dependent
+  cross-document joins remain possible; dependent joins must carry at least two
+  distinctive verified terms, and the corrective evidence must match them. Duplicate
+  corrective chunks are discarded, and a reserved answer budget falls back to the
+  verified quotes instead of starting synthesis too close to the deadline.
 - **Limitation:** Python cannot safely kill a running synchronous provider call. The request returns at the deadline, but a non-cooperative call already running in the worker relies on its configured HTTP timeout.
 - **Implementation update:** D-013 removes the unnecessary graph framework while
   retaining these bounds.
@@ -91,10 +117,10 @@ Decisions are recorded before measurements so later results are not tuned to a p
 
 ## D-011: Index XLSX sheets as document evidence
 
-- **Decision:** Parse XLSX sheets locally with openpyxl, preserve workbook and
-  sheet provenance, convert rows to labeled text, and index them through the same
-  Chroma and BM25 path as other documents. Retain deterministic unambiguous row
-  lookup in the grounding layer.
+- **Decision:** Parse XLSX sheets locally with openpyxl, convert every nonempty row
+  to its own labeled node, preserve workbook/sheet/row provenance, and index those
+  nodes through the same Chroma and BM25 path as other documents. Retain deterministic
+  unambiguous single-row lookup in the grounding layer.
 - **Why:** One retrieval path supports spreadsheet search and cross-file evidence
   while keeping provenance and answer behavior consistent across formats.
 
@@ -118,10 +144,12 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Decision:** Cache embeddings, provider configurations, and loaded indexes at
   their owning RAG boundaries. Run the bounded retrieval workflow directly and
   expose one MCP retrieval tool instead of equivalent search/inspection aliases.
+  Direct RAG uses the same request engine with decomposition and correction disabled.
 - **Why:** The workflow is linear, non-recursive, and has no durable graph state.
   Recreating models and reopening an unchanged index for every request added
   latency without changing results, while duplicate MCP tools exposed the same
-  reranked retrieval behavior under different names.
+  reranked retrieval behavior under different names. Sharing the answer engine also
+  prevents `/chat` and `/agent` from drifting into two grounding implementations.
 - **Rejected:** Eager model loading that delays the health/UI endpoints, a cache
   registry abstraction for three small caches, and merging retrieval, grounding,
   and multi-hop responsibilities into one module.
@@ -267,6 +295,8 @@ Decisions are recorded before measurements so later results are not tuned to a p
   retried with a closed HTTP client and surfaced `RuntimeError` before retrieval.
 - **Guard:** This changes only runtime cache lookup. It does not change model names,
   embeddings, index compatibility, retrieval ranking, or answer content.
+- **Deployment:** Setup and update scripts temporarily opt into network access and
+  warm both fixed Hugging Face models before starting the offline runtime service.
 
 ## D-023: Separate supporting evidence from retrieval diagnostics
 
@@ -286,9 +316,10 @@ Decisions are recorded before measurements so later results are not tuned to a p
   verifier confirmed its text. The browser hides scores for supporting evidence,
   numbers references by first citation appearance, and labels abstention results as
   closest retrieved passages rather than evidence.
-- **Evaluation contract:** New runs report expected supporting-source recall,
-  exact citation/source alignment, and grouped-evidence shape. These are mechanical
-  provenance checks, not automated answer-correctness scores. The retained August 3
+- **Evaluation contract:** New runs retain ranked retrieval traces and grouped
+  supporting evidence, then report context precision, expected-source recall,
+  faithfulness, answer correctness, hallucination rate, citation accuracy, and
+  abstention behavior from direct review. The retained August 3
   `expected_source_recall` value measured the older top-k response and is not
   directly comparable.
 
@@ -308,3 +339,96 @@ Decisions are recorded before measurements so later results are not tuned to a p
 - **Migration:** Existing `SimpleVectorStore` indexes are not read through the new
   boundary. Recreate each collection from its uploaded files after this storage
   layout change.
+
+## D-025: Require a same-stack ablation for model-selection claims
+
+- **Decision:** Treat the retained Llama-versus-Qwen scorecard as a historical
+  diagnostic, not a causal model comparison. Do not attribute its deltas to model
+  size or change the default model from that comparison alone. A model-selection
+  run must hold the code revision, prompts, index fingerprint, context window,
+  thinking mode, timeout, datasets, repetition order, and scoring rubric fixed.
+- **Why:** The historical Llama router decomposed 6 of 15 multi-hop cases while the
+  13 August Qwen router decomposed all 15, and grounding, XLSX layout, Ollama transport,
+  prompts, and evidence validation also changed. The Qwen regression was concentrated
+  in the six cases both routers decomposed and included quote-validation, dependent-
+  join, and deadline failures even though the expected evidence was retrieved.
+- **Guard:** Publish disproven hypotheses and trace-level failure evidence, but keep
+  operational workflow regressions separate from claims about intrinsic model
+  capability. Use the fixed 30-second run for product selection; a longer-timeout
+  run may be reported separately as a latency diagnostic.
+- **Invalidated evidence:** The old narrow and full scorecards used direct-review
+  scripts that did not independently grade every answer against the reference.
+  Their numerical results are void and are superseded by D-028.
+
+## D-026: Make refusal-resistant metrics the release contract
+
+- **Decision:** Always publish answer rate, correctness conditional on answering,
+  and strict correctness as one triple. Never quote conditional correctness without
+  its answer rate. Require at least 65% answer rate within each answerable stratum,
+  and measure false abstention when all labeled supporting sources were retrieved.
+- **Why:** The contract changed after the 13 August results were inspected. The old
+  rubric counted abstentions as wrong, but a conditional-only interpretation could
+  still reward a system for refusing its difficult cases. The answer-rate floor and
+  false-abstention cap make that tradeoff visible.
+- **Operational boundary:** A deadline fallback is an infrastructure/runtime
+  failure, not a deliberate refusal. Report its rate separately and exclude it from
+  the false-abstention numerator. Grounding metrics are calculated on returned
+  answers and must be published beside the answer triple.
+- **Release gates:** Aggregate answer rate >=75% and conditional correctness >=85%;
+  per-category answer rate >=65%; conditional correctness >=90% for single-hop and
+  >=75% for multi-hop and XLSX; false abstention <=25%; and deadline fallbacks <5%.
+
+## D-027: Keep verification independent of output shape and evidence rank
+
+- **Decision:** Accept any nonempty number of literal verifier quote fragments when
+  they resolve unambiguously to the named source. Preserve all candidates tied at
+  a selection boundary and use question terms, exact identifiers, and verified
+  join evidence—not implicit list position—to choose supporting rows.
+- **Why:** The Qwen regression reproduced with the expected evidence already in the
+  retrieval trace. Validation assumed a fixed response shape, and candidate
+  selection preferred an earlier-ranked unrelated row. Both were controller/model
+  coupling bugs rather than missing model capability.
+- **Guard:** Variable-length output does not weaken grounding: every accepted quote
+  must still be a literal source substring, exact requested identifiers must match,
+  and dependent joins must reuse distinctive verified terms. Tests cover reordered,
+  tied, and longer verifier responses so ranking is not a hidden correctness input.
+
+## D-028: Select Llama 3.2 3B from the full same-stack ablation
+
+- **Decision:** Restore `llama3.2:3b` as the default planner and generation model.
+  Keep `qwen3:8b` available as an operator override and continue disabling Qwen
+  thinking in the bounded request path.
+- **Evidence:** On the 18 August current code, both models ran the same 240
+  corrective-ON trials. Both answer-rate / conditional / strict triples were
+  96.0% / 83.3% / 80.0%. Qwen mean/P95 latency was 7.78/12.52 seconds and Llama
+  mean/P95 was 7.80/12.39 seconds, with zero deadline fallbacks for both. Llama
+  used 2.8% fewer recorded tokens. Retrieval traces were identical on all 240
+  trials and answers were identical on 237; the three differing `inject-002`
+  answers score zero for both models.
+- **Interpretation:** The historical multi-hop drop was an integration regression,
+  but the old claim that multi-hop rose to 90.3% was a grading artifact. Valid
+  multi-hop correctness is 66.7% for both models. After injection continuation was
+  fixed, end-to-end injection handling is 75.0% for both. The clean model comparison
+  finds no strict-quality benefit from the nominal 2.7x parameter increase. Choose
+  the smaller model for footprint and token use, not because either model passes
+  the release gate.
+
+## D-029: Neutralize retrieved injections and continue answering
+
+- **Decision:** Detect and flag prompt-injection spans, remove those spans while
+  retaining legitimate text in the same question or chunk, and continue through
+  the normal retrieval, answer, grounding, and citation path. A flag alone must
+  never terminate an otherwise answerable request.
+- **Why:** The independently graded baseline passed only 2/8 injection cases. The
+  controller contained an explicit flag-triggered stop, whole contaminated chunks
+  were discarded, and substantive answers could be collapsed when a model appended
+  the stock abstention sentence.
+- **Evidence:** The final eight-case Qwen loop passed 6/8, and both frozen-stack
+  240-trial runs passed 18/24 injection repetitions (75.0%) with 100% flagging,
+  faithfulness, and citation accuracy. No correctness case regressed. General
+  negative-scope and filtered-row handling also improved `single-004` and
+  `sheet-010`; multi-hop, retrieval, grounding, and the other adversarial strata
+  remained unchanged.
+- **Guard:** Tests cover same-chunk neutralization, continuation after a trailing
+  refusal, explicit negative scope evidence, filtered rows split across retrieved
+  source objects, wrong-answer grading, and identifier punctuation in references.

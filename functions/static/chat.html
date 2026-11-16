@@ -6,304 +6,33 @@
   <meta name="description" content="Chat with your indexed documents using Agentic CRAG.">
   <title>Agentic CRAG</title>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #090d16;
-      --panel: #101725;
-      --panel-strong: #151e2e;
-      --line: #273247;
-      --text: #e9eef8;
-      --muted: #98a5ba;
-      --accent: #68e0c1;
-      --accent-strong: #33cba6;
-      --accent-soft: rgba(104, 224, 193, 0.12);
-      --danger: #ff8b8b;
-      --shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      overflow: hidden;
-      color: var(--text);
-      background:
-        radial-gradient(circle at 10% 10%, rgba(64, 112, 173, 0.14), transparent 28rem),
-        radial-gradient(circle at 90% 90%, rgba(51, 203, 166, 0.09), transparent 30rem),
-        var(--bg);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    button, input, select, textarea { font: inherit; }
-    button, select { cursor: pointer; }
-    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    .app {
-      display: grid;
-      grid-template-columns: 300px minmax(0, 1fr);
-      min-height: 100vh;
-    }
-
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-      padding: 26px 22px;
-      border-right: 1px solid var(--line);
-      background: rgba(11, 16, 27, 0.82);
-      backdrop-filter: blur(18px);
-    }
-
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand-mark {
-      display: grid;
-      width: 38px;
-      height: 38px;
-      place-items: center;
-      border: 1px solid rgba(104, 224, 193, 0.35);
-      border-radius: 12px;
-      color: #07120f;
-      background: linear-gradient(135deg, #9cf0db, var(--accent-strong));
-      box-shadow: 0 8px 30px rgba(51, 203, 166, 0.2);
-      font-weight: 900;
-    }
-    .brand-name { font-weight: 800; letter-spacing: 0.08em; }
-    .brand-subtitle { margin-top: 2px; color: var(--muted); font-size: 12px; }
-
-    .section { display: grid; gap: 9px; }
-    .section-title {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 750;
-      letter-spacing: 0.11em;
-      text-transform: uppercase;
-    }
-
-    .field-row { display: flex; gap: 8px; }
-    .field, .select {
-      width: 100%;
-      min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      color: var(--text);
-      background: var(--panel);
-    }
-    .field { padding: 10px 11px; cursor: text; }
-    .select { padding: 10px 34px 10px 11px; }
-    .field::placeholder, textarea::placeholder { color: #68758b; }
-
-    .icon-button, .secondary-button, .primary-button {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      color: var(--text);
-      background: var(--panel-strong);
-      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
-    }
-    .icon-button:hover, .secondary-button:hover { border-color: #3c4a64; background: #1a2538; }
-    .icon-button:active, .secondary-button:active, .primary-button:active { transform: translateY(1px); }
-    .icon-button { flex: 0 0 42px; min-height: 42px; font-size: 17px; }
-    .secondary-button { padding: 9px 12px; }
-    .primary-button {
-      padding: 10px 14px;
-      border-color: transparent;
-      color: #06120f;
-      background: linear-gradient(135deg, #8debd3, var(--accent-strong));
-      font-weight: 800;
-    }
-    .primary-button:hover { filter: brightness(1.05); }
-    button:disabled { cursor: not-allowed; filter: grayscale(0.5); opacity: 0.55; }
-
-    .upload-form {
-      display: grid;
-      gap: 9px;
-      padding: 13px;
-      border: 1px solid var(--line);
-      border-radius: 13px;
-      background: rgba(21, 30, 46, 0.58);
-    }
-    .file-input { width: 100%; color: var(--muted); font-size: 12px; }
-    .file-input::file-selector-button {
-      margin-right: 9px;
-      padding: 7px 9px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      color: var(--text);
-      background: var(--panel);
-      cursor: pointer;
-    }
-    .help { color: var(--muted); font-size: 12px; line-height: 1.45; }
-
-    .collection-details {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(16, 23, 37, 0.62);
-    }
-    .collection-details summary {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 9px 11px;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .collection-files {
-      display: grid;
-      gap: 8px;
-      max-height: 150px;
-      margin: 0;
-      padding: 10px 11px;
-      overflow-y: auto;
-      border-top: 1px solid var(--line);
-      list-style: none;
-    }
-    .collection-file { display: grid; gap: 2px; min-width: 0; }
-    .collection-filename { overflow-wrap: anywhere; font-size: 12px; }
-    .collection-file-type { color: var(--muted); font-size: 10px; text-transform: uppercase; }
-    .danger-button { width: 100%; color: var(--danger); }
-    .danger-button:hover { border-color: rgba(255, 139, 139, 0.55); background: rgba(255, 139, 139, 0.08); }
-
-    .sidebar-footer { display: grid; gap: 12px; margin-top: auto; }
-    .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #708098; }
-    .status.ok .status-dot { background: var(--accent); box-shadow: 0 0 12px var(--accent); }
-    .status.error { color: var(--danger); }
-    .status.error .status-dot { background: var(--danger); }
-    .docs-link { color: var(--muted); font-size: 12px; text-decoration: none; }
-    .docs-link:hover { color: var(--text); }
-
-    .main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; height: 100vh; }
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 68px;
-      padding: 0 30px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(9, 13, 22, 0.58);
-      backdrop-filter: blur(12px);
-    }
-    .conversation-title { font-size: 14px; font-weight: 700; }
-    .conversation-context { margin-top: 3px; color: var(--muted); font-size: 12px; }
-
-    .messages {
-      overflow-y: auto;
-      padding: 36px max(24px, calc((100% - 880px) / 2));
-      scroll-behavior: smooth;
-    }
-    .welcome { display: grid; place-items: center; min-height: 100%; text-align: center; }
-    .welcome-inner { max-width: 680px; }
-    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }
-    h1 { margin: 13px 0 12px; font-size: clamp(32px, 4.5vw, 56px); line-height: 1.03; letter-spacing: -0.045em; }
-    .welcome-copy { max-width: 580px; margin: 0 auto; color: var(--muted); font-size: 16px; line-height: 1.65; }
-    .suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }
-    .suggestion {
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: 13px;
-      color: var(--text);
-      background: rgba(16, 23, 37, 0.65);
-      text-align: left;
-      line-height: 1.4;
-    }
-    .suggestion:hover { border-color: rgba(104, 224, 193, 0.5); background: var(--accent-soft); }
-
-    .message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; margin-bottom: 28px; }
-    .avatar {
-      display: grid;
-      width: 34px;
-      height: 34px;
-      place-items: center;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      color: var(--muted);
-      background: var(--panel-strong);
-      font-size: 12px;
-      font-weight: 850;
-    }
-    .assistant .avatar { border-color: rgba(104, 224, 193, 0.3); color: var(--accent); background: var(--accent-soft); }
-    .message-role { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
-    .message-text { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
-    .message-text p { margin: 0; white-space: pre-wrap; }
-    .message-text p + p { margin-top: 10px; }
-    .message-text h3 {
-      margin: 18px 0 7px;
-      color: #dfe8f5;
-      font-size: 13px;
-      line-height: 1.35;
-      letter-spacing: 0.015em;
-    }
-    .message-text p + h3 { margin-top: 15px; }
-    .message-text ul { display: grid; gap: 5px; margin: 0; padding-left: 20px; }
-    .message-text li { padding-left: 2px; }
-    .error-message .message-text { color: var(--danger); }
-    .meta { margin-top: 9px; color: var(--muted); font-size: 11px; }
-
-    .sources { margin-top: 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(16, 23, 37, 0.62); }
-    .sources summary { padding: 11px 13px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }
-    .source { padding: 12px 13px; border-top: 1px solid var(--line); }
-    .source-heading { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: 12px; font-weight: 750; }
-    .source-score { color: var(--muted); font-weight: 500; }
-    .source-passage + .source-passage { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(43, 57, 78, 0.72); }
-    .source-passage-label { margin: 0; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
-    .source-text { margin: 8px 0 0; color: #b8c2d2; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .source-toggle { margin-top: 7px; padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
-    .source-toggle:hover { text-decoration: underline; }
-    .source-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
-
-    .thinking { display: inline-flex; gap: 5px; padding-top: 8px; }
-    .thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite ease-in-out; }
-    .thinking span:nth-child(2) { animation-delay: 140ms; }
-    .thinking span:nth-child(3) { animation-delay: 280ms; }
-    @keyframes pulse { 0%, 70%, 100% { opacity: 0.25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
-
-    .composer-wrap {
-      padding: 16px max(24px, calc((100% - 880px) / 2)) 24px;
-      border-top: 1px solid rgba(39, 50, 71, 0.72);
-      background: linear-gradient(to top, var(--bg) 72%, rgba(9, 13, 22, 0));
-    }
-    .composer {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 10px;
-      padding: 9px 9px 9px 15px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-    }
-    .composer:focus-within { border-color: rgba(104, 224, 193, 0.45); }
-    textarea {
-      width: 100%;
-      max-height: 160px;
-      resize: none;
-      padding: 10px 0;
-      border: 0;
-      outline: 0;
-      color: var(--text);
-      background: transparent;
-      line-height: 1.45;
-    }
-    .send { min-width: 92px; align-self: end; }
-    .composer-note { margin: 8px 3px 0; color: #657187; font-size: 11px; text-align: center; }
-
-    @media (max-width: 760px) {
-      body { overflow: auto; }
-      .app { grid-template-columns: 1fr; }
-      .sidebar { gap: 15px; padding: 16px; border-right: 0; border-bottom: 1px solid var(--line); }
-      .brand-subtitle, .docs-link { display: none; }
-      .main { height: calc(100vh - 338px); min-height: 520px; }
-      .topbar { min-height: 58px; padding: 0 16px; }
-      .messages { padding: 24px 16px; }
-      .composer-wrap { padding: 12px 16px 16px; }
-      .suggestions { grid-template-columns: 1fr; }
-      .send { min-width: 72px; }
-    }
+    :root { color-scheme: dark; --bg: #090d16; --panel: #101725; --panel-strong: #151e2e; --line: #273247; --text: #e9eef8; --muted: #98a5ba; --accent: #68e0c1; --accent-strong: #33cba6; --accent-soft: rgba(104, 224, 193, 0.12); --danger: #ff8b8b; --shadow: 0 24px 70px rgba(0, 0, 0, 0.28); }* { box-sizing: border-box; }body { margin: 0; min-height: 100vh; overflow: hidden; color: var(--text); background: radial-gradient(circle at 10% 10%, rgba(64, 112, 173, 0.14), transparent 28rem), radial-gradient(circle at 90% 90%, rgba(51, 203, 166, 0.09), transparent 30rem), var(--bg); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }button, input, select, textarea { font: inherit; }
+    button, select { cursor: pointer; }button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }.app { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 100vh; } .sidebar { display: flex; flex-direction: column; gap: 24px; padding: 26px 22px; border-right: 1px solid var(--line); background: rgba(11, 16, 27, 0.82); backdrop-filter: blur(18px); }
+    .brand { display: flex; align-items: center; gap: 12px; }.brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(104, 224, 193, 0.35); border-radius: 12px; color: #07120f; background: linear-gradient(135deg, #9cf0db, var(--accent-strong)); box-shadow: 0 8px 30px rgba(51, 203, 166, 0.2); font-weight: 900; }.brand-name { font-weight: 800; letter-spacing: 0.08em; }.brand-subtitle { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .section { display: grid; gap: 9px; }.section-title { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: 0.11em; text-transform: uppercase; } .field-row { display: flex; gap: 8px; }.field, .select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); }
+    .field { padding: 10px 11px; cursor: text; }.select { padding: 10px 34px 10px 11px; }.field::placeholder, textarea::placeholder { color: #68758b; }.icon-button, .secondary-button, .primary-button { border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel-strong); transition: transform 120ms ease, border-color 120ms ease, background 120ms ease; }
+    .icon-button:hover, .secondary-button:hover { border-color: #3c4a64; background: #1a2538; } .icon-button:active, .secondary-button:active, .primary-button:active { transform: translateY(1px); }.icon-button { flex: 0 0 42px; min-height: 42px; font-size: 17px; }.secondary-button { padding: 9px 12px; }
+    .primary-button { padding: 10px 14px; border-color: transparent; color: #06120f; background: linear-gradient(135deg, #8debd3, var(--accent-strong)); font-weight: 800; }.primary-button:hover { filter: brightness(1.05); }button:disabled { cursor: not-allowed; filter: grayscale(0.5); opacity: 0.55; }.upload-form { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: rgba(21, 30, 46, 0.58); }
+    .file-input { width: 100%; color: var(--muted); font-size: 12px; }.file-input::file-selector-button { margin-right: 9px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel); cursor: pointer; }.help { color: var(--muted); font-size: 12px; line-height: 1.45; }.collection-details { border: 1px solid var(--line); border-radius: 10px; background: rgba(16, 23, 37, 0.62); }
+    .collection-details summary { display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }.collection-files { display: grid; gap: 8px; max-height: 150px; margin: 0; padding: 10px 11px; overflow-y: auto; border-top: 1px solid var(--line); list-style: none; }.collection-file { display: grid; gap: 2px; min-width: 0; } .collection-filename { overflow-wrap: anywhere; font-size: 12px; }
+    .collection-file-type { color: var(--muted); font-size: 10px; text-transform: uppercase; }.danger-button { width: 100%; color: var(--danger); }.danger-button:hover { border-color: rgba(255, 139, 139, 0.55); background: rgba(255, 139, 139, 0.08); }.sidebar-footer { display: grid; gap: 12px; margin-top: auto; }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }.status-dot { width: 7px; height: 7px; border-radius: 50%; background: #708098; } .status.ok .status-dot { background: var(--accent); box-shadow: 0 0 12px var(--accent); }.status.error { color: var(--danger); }
+    .status.error .status-dot { background: var(--danger); }.docs-link { color: var(--muted); font-size: 12px; text-decoration: none; }.docs-link:hover { color: var(--text); }.main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; height: 100vh; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 0 30px; border-bottom: 1px solid var(--line); background: rgba(9, 13, 22, 0.58); backdrop-filter: blur(12px); } .conversation-title { font-size: 14px; font-weight: 700; }.conversation-context { margin-top: 3px; color: var(--muted); font-size: 12px; }.messages { overflow-y: auto; padding: 36px max(24px, calc((100% - 880px) / 2)); scroll-behavior: smooth; }
+    .welcome { display: grid; place-items: center; min-height: 100%; text-align: center; }.welcome-inner { max-width: 680px; }.eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }h1 { margin: 13px 0 12px; font-size: clamp(32px, 4.5vw, 56px); line-height: 1.03; letter-spacing: -0.045em; }
+    .welcome-copy { max-width: 580px; margin: 0 auto; color: var(--muted); font-size: 16px; line-height: 1.65; }.suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }.suggestion { padding: 14px; border: 1px solid var(--line); border-radius: 13px; color: var(--text); background: rgba(16, 23, 37, 0.65); text-align: left; line-height: 1.4; }.suggestion:hover { border-color: rgba(104, 224, 193, 0.5); background: var(--accent-soft); }
+    .message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; margin-bottom: 28px; }.avatar { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--panel-strong); font-size: 12px; font-weight: 850; }.assistant .avatar { border-color: rgba(104, 224, 193, 0.3); color: var(--accent); background: var(--accent-soft); } .message-role { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .message-text { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }.message-text p { margin: 0; white-space: pre-wrap; }.message-text p + p { margin-top: 10px; }.message-text h3 { margin: 18px 0 7px; color: #dfe8f5; font-size: 13px; line-height: 1.35; letter-spacing: 0.015em; }
+    .message-text p + h3 { margin-top: 15px; }.message-text ul { display: grid; gap: 5px; margin: 0; padding-left: 20px; } .message-text li { padding-left: 2px; }.error-message .message-text { color: var(--danger); }
+    .meta { margin-top: 9px; color: var(--muted); font-size: 11px; }.sources { margin-top: 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(16, 23, 37, 0.62); }.sources summary { padding: 11px 13px; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }.source { padding: 12px 13px; border-top: 1px solid var(--line); }
+    .source-heading { display: flex; justify-content: space-between; gap: 12px; color: var(--accent); font-size: 12px; font-weight: 750; } .source-score { color: var(--muted); font-weight: 500; }.source-passage + .source-passage { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(43, 57, 78, 0.72); }.source-passage-label { margin: 0; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+    .source-text { margin: 8px 0 0; color: #b8c2d2; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }.source-toggle { margin-top: 7px; padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }.source-toggle:hover { text-decoration: underline; }.source-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+    .thinking { display: inline-flex; gap: 5px; padding-top: 8px; }.thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite ease-in-out; }.thinking span:nth-child(2) { animation-delay: 140ms; }.thinking span:nth-child(3) { animation-delay: 280ms; }
+    @keyframes pulse {0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }35% { opacity: 1; transform: translateY(-3px); } } .composer-wrap { padding: 16px max(24px, calc((100% - 880px) / 2)) 24px; border-top: 1px solid rgba(39, 50, 71, 0.72); background: linear-gradient(to top, var(--bg) 72%, rgba(9, 13, 22, 0)); }
+    .composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 9px 9px 9px 15px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow); }.composer:focus-within { border-color: rgba(104, 224, 193, 0.45); }textarea { width: 100%; max-height: 160px; resize: none; padding: 10px 0; border: 0; outline: 0; color: var(--text); background: transparent; line-height: 1.45; }.send { min-width: 92px; align-self: end; }
+    .composer-note { margin: 8px 3px 0; color: #657187; font-size: 11px; text-align: center; } @media (max-width: 760px) {body { overflow: auto; } .app { grid-template-columns: 1fr; }.sidebar { gap: 15px; padding: 16px; border-right: 0; border-bottom: 1px solid var(--line); }
+    .brand-subtitle, .docs-link { display: none; }.main { height: calc(100vh - 338px); min-height: 520px; }.topbar { min-height: 58px; padding: 0 16px; }.messages { padding: 24px 16px; }
+    .composer-wrap { padding: 12px 16px 16px; } .suggestions { grid-template-columns: 1fr; }.send { min-width: 72px; } }
   </style>
 </head>
 <body>
@@ -316,7 +45,6 @@
           <div class="brand-subtitle">Corrective document RAG</div>
         </div>
       </div>
-
       <section class="section" aria-labelledby="collection-label">
         <label class="section-title" id="collection-label" for="collection">Collection</label>
         <div class="field-row">
@@ -330,7 +58,6 @@
         </details>
         <button class="secondary-button danger-button" id="delete-collection" type="button" disabled>Delete collection</button>
       </section>
-
       <section class="section">
         <label class="section-title" for="mode">Answer mode</label>
         <select class="select" id="mode">
@@ -338,7 +65,6 @@
           <option value="chat">Direct RAG · single pass</option>
         </select>
       </section>
-
       <section class="section" aria-labelledby="upload-title">
         <div class="section-title" id="upload-title">Add documents</div>
         <form class="upload-form" id="upload-form">
@@ -348,13 +74,11 @@
           <div class="help">PDF, DOCX, XLSX, or image · 10 MB combined</div>
         </form>
       </section>
-
       <div class="sidebar-footer">
         <div class="status" id="status"><span class="status-dot"></span><span id="status-text">Connecting…</span></div>
         <a class="docs-link" href="/docs" target="_blank" rel="noreferrer">Open API documentation ↗</a>
       </div>
     </aside>
-
     <main class="main">
       <header class="topbar">
         <div>
@@ -363,7 +87,6 @@
         </div>
         <button class="secondary-button" id="clear" type="button">New chat</button>
       </header>
-
       <section class="messages" id="messages" aria-live="polite">
         <div class="welcome" id="welcome">
           <div class="welcome-inner">
@@ -379,7 +102,6 @@
           </div>
         </div>
       </section>
-
       <div class="composer-wrap">
         <form class="composer" id="chat-form">
           <textarea id="message" rows="1" placeholder="Ask a question about the selected collection…" aria-label="Message" required></textarea>
@@ -392,28 +114,15 @@
 
   <script>
     const state = { history: [], busy: false, indexes: [] };
-    const elements = {
-      collection: document.querySelector("#collection"),
-      collectionDetails: document.querySelector("#collection-details"),
-      collectionFiles: document.querySelector("#collection-files"),
-      collectionFileCount: document.querySelector("#collection-file-count"),
-      deleteCollection: document.querySelector("#delete-collection"),
-      context: document.querySelector("#conversation-context"),
-      messages: document.querySelector("#messages"),
-      welcome: document.querySelector("#welcome"),
-      form: document.querySelector("#chat-form"),
-      message: document.querySelector("#message"),
-      send: document.querySelector("#send"),
-      mode: document.querySelector("#mode"),
-      refresh: document.querySelector("#refresh"),
-      clear: document.querySelector("#clear"),
-      uploadForm: document.querySelector("#upload-form"),
-      uploadButton: document.querySelector("#upload-button"),
-      indexName: document.querySelector("#index-name"),
-      files: document.querySelector("#files"),
-      status: document.querySelector("#status"),
-      statusText: document.querySelector("#status-text")
-    };
+    const elementIds = { collection: "collection", collectionDetails: "collection-details", collectionFiles: "collection-files", collectionFileCount: "collection-file-count", deleteCollection: "delete-collection", context: "conversation-context", messages: "messages", welcome: "welcome", form: "chat-form", message: "message", send: "send", mode: "mode", refresh: "refresh", clear: "clear", uploadForm: "upload-form", uploadButton: "upload-button", indexName: "index-name", files: "files", status: "status", statusText: "status-text" };
+    const elements = Object.fromEntries(Object.entries(elementIds).map(([name, id]) => [name, document.querySelector(`#${id}`)]));
+
+    function createElement(tag, className = "", text = "") {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text) element.textContent = text;
+      return element;
+    }
 
     function setStatus(message, kind = "") {
       elements.status.className = `status ${kind}`.trim();
@@ -427,12 +136,17 @@
       return `Request failed (${response.status})`;
     }
 
+    async function requestJson(url, options) {
+      const response = await fetch(url, options);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(errorDetail(response, payload));
+      return payload;
+    }
+
     async function loadCollections(preferred = "") {
       setStatus("Loading collections…");
       try {
-        const response = await fetch("/indexes");
-        const payload = await response.json();
-        if (!response.ok) throw new Error(errorDetail(response, payload));
+        const payload = await requestJson("/indexes");
         state.indexes = payload.indexes;
         const previous = preferred || elements.collection.value;
         elements.collection.replaceChildren();
@@ -466,14 +180,9 @@
       elements.collectionFileCount.textContent = String(documents.length);
       elements.collectionFiles.replaceChildren();
       for (const documentInfo of documents) {
-        const item = document.createElement("li");
-        item.className = "collection-file";
-        const filename = document.createElement("span");
-        filename.className = "collection-filename";
-        filename.textContent = documentInfo.filename || "Unnamed file";
-        const type = document.createElement("span");
-        type.className = "collection-file-type";
-        type.textContent = documentInfo.type || "document";
+        const item = createElement("li", "collection-file");
+        const filename = createElement("span", "collection-filename", documentInfo.filename || "Unnamed file");
+        const type = createElement("span", "collection-file-type", documentInfo.type || "document");
         item.append(filename, type);
         elements.collectionFiles.append(item);
       }
@@ -494,7 +203,6 @@
         `Delete collection "${indexId}" and all of its uploaded files? This cannot be undone.`
       );
       if (!confirmed) return;
-
       state.busy = true;
       elements.deleteCollection.disabled = true;
       elements.collection.disabled = true;
@@ -502,9 +210,7 @@
       elements.message.disabled = true;
       setStatus(`Deleting ${indexId}…`);
       try {
-        const response = await fetch(`/indexes/${encodeURIComponent(indexId)}`, { method: "DELETE" });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(errorDetail(response, payload));
+        await requestJson(`/indexes/${encodeURIComponent(indexId)}`, { method: "DELETE" });
         state.history = [];
         await loadCollections();
         setStatus(`Deleted ${indexId}`, "ok");
@@ -520,12 +226,7 @@
     }
 
     function sourceReferenceNumbers(text, sources) {
-      const references = new Map();
-      const filenames = [];
-      for (const source of sources) {
-        const filename = source.filename;
-        if (filename && !filenames.includes(filename)) filenames.push(filename);
-      }
+      const filenames = [...new Set(sources.map(source => source.filename).filter(Boolean))];
       filenames.sort((left, right) => {
         const leftPosition = text.indexOf(`[${left}]`);
         const rightPosition = text.indexOf(`[${right}]`);
@@ -534,87 +235,60 @@
         if (rightPosition < 0) return -1;
         return leftPosition - rightPosition;
       });
-      for (const filename of filenames) {
-        references.set(filename, references.size + 1);
-      }
-      return references;
+      return new Map(filenames.map((filename, index) => [filename, index + 1]));
     }
 
     function compactCitations(text, sources) {
-      let formatted = text;
-      for (const [filename, referenceNumber] of sourceReferenceNumbers(text, sources)) {
-        formatted = formatted.split(`[${filename}]`).join(`[${referenceNumber}]`);
-      }
-      return formatted;
+      return [...sourceReferenceNumbers(text, sources)].reduce(
+        (answer, [filename, number]) => answer.split(`[${filename}]`).join(`[${number}]`), text
+      );
     }
 
     function appendStructuredText(container, text) {
       let activeList = null;
       for (const rawLine of text.split(/\r?\n/)) {
         const line = rawLine.trim();
-        if (!line) {
+        if (!line) { activeList = null; continue; }
+        const heading = line.match(/^##\s+(.+)$/);
+        if (heading) {
           activeList = null;
+          const title = document.createElement("h3");
+          title.textContent = heading[1];
+          container.append(title);
           continue;
         }
-        const headingMatch = line.match(/^##\s+(.+)$/);
-        if (headingMatch) {
-          activeList = null;
-          const heading = document.createElement("h3");
-          heading.textContent = headingMatch[1];
-          container.append(heading);
-          continue;
-        }
-        const bulletMatch = line.match(/^[-*]\s+(.+)$/);
-        if (bulletMatch) {
+        const bullet = line.match(/^[-*]\s+(.+)$/);
+        if (bullet) {
           if (!activeList) {
             activeList = document.createElement("ul");
             container.append(activeList);
           }
-          const item = document.createElement("li");
-          item.textContent = bulletMatch[1];
-          activeList.append(item);
+          activeList.append(createElement("li", "", bullet[1]));
           continue;
         }
         activeList = null;
-        const paragraph = document.createElement("p");
-        paragraph.textContent = line;
-        container.append(paragraph);
+        container.append(createElement("p", "", line));
       }
     }
 
     function appendMessage(role, text, sources = [], metadata = {}) {
       elements.welcome?.remove();
-      const item = document.createElement("article");
-      item.className = `message ${role}`;
-
-      const avatar = document.createElement("div");
-      avatar.className = "avatar";
-      avatar.textContent = role === "user" ? "YOU" : role === "error-message" ? "!" : "AI";
-
-      const body = document.createElement("div");
-      const label = document.createElement("p");
-      label.className = "message-role";
-      label.textContent = role === "user" ? "You" : role === "error-message" ? "Request error" : "AGENTIC CRAG";
-      const content = document.createElement("div");
-      content.className = "message-text";
+      const item = createElement("article", `message ${role}`);
+      const avatar = createElement("div", "avatar", role === "user" ? "YOU" : role === "error-message" ? "!" : "AI");
+      const body = createElement("div");
+      const label = createElement("p", "message-role", role === "user" ? "You" : role === "error-message" ? "Request error" : "AGENTIC CRAG");
+      const content = createElement("div", "message-text");
       appendStructuredText(content, compactCitations(text, sources));
       body.append(label, content);
-
       const metaParts = [];
       if (metadata.confidence) metaParts.push(`Confidence: ${metadata.confidence}`);
       if (metadata.iterations !== undefined) metaParts.push(`Retrievals: ${metadata.iterations}`);
       if (metadata.termination_reason) metaParts.push(`Status: ${metadata.termination_reason}`);
       if (metaParts.length) {
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = metaParts.join(" · ");
-        body.append(meta);
+        body.append(createElement("div", "meta", metaParts.join(" · ")));
       }
-
-      const abstained = metadata.termination_reason === "abstained"
-        || text.includes("The answer is not present in the provided documents.");
-      const supporting = !abstained
-        && sources.every(source => Array.isArray(source.passages));
+      const abstained = metadata.termination_reason === "abstained" || text.includes("The answer is not present in the provided documents.");
+      const supporting = !abstained && sources.every(source => Array.isArray(source.passages));
       if (sources.length) body.append(createSources(text, sources, supporting));
       item.append(avatar, body);
       elements.messages.append(item);
@@ -632,61 +306,37 @@
     }
 
     function createSources(text, sources, supporting = true) {
-      const details = document.createElement("details");
-      details.className = "sources";
+      const details = createElement("details", "sources");
       const references = sourceReferenceNumbers(text, sources);
-      const summary = document.createElement("summary");
-      const passageCount = sources.reduce((total, source) => {
-        const passages = Array.isArray(source.passages) && source.passages.length
-          ? source.passages
-          : [source];
-        return total + passages.length;
-      }, 0);
+      const summary = createElement("summary");
+      const passageCount = sources.reduce((total, source) => total + (source.passages?.length || 1), 0);
       const documentLabel = sources.length === 1 ? "supporting document" : "supporting documents";
       const passageLabel = passageCount === 1 ? "cited passage" : "cited passages";
-      summary.textContent = supporting
-        ? `${sources.length} ${documentLabel} \u00b7 ${passageCount} ${passageLabel}`
-        : `${sources.length} closest retrieved passage${sources.length === 1 ? "" : "s"}`;
+      summary.textContent = supporting ? `${sources.length} ${documentLabel} \u00b7 ${passageCount} ${passageLabel}` : `${sources.length} closest retrieved passage${sources.length === 1 ? "" : "s"}`;
       details.append(summary);
-
       sources.forEach((source, index) => {
-        const item = document.createElement("div");
-        item.className = "source";
-        const heading = document.createElement("div");
-        heading.className = "source-heading";
-        const filename = document.createElement("span");
+        const item = createElement("div", "source");
+        const heading = createElement("div", "source-heading");
+        const filename = createElement("span");
         const referenceNumber = references.get(source.filename);
-        filename.textContent = source.filename
-          ? `${referenceNumber ? `[${referenceNumber}] ` : ""}${source.filename}`
-          : `Source ${index + 1}`;
-        const score = document.createElement("span");
-        score.className = "source-score";
-        score.textContent = supporting ? "" : `relevance ${source.score}`;
+        filename.textContent = source.filename ? `${referenceNumber ? `[${referenceNumber}] ` : ""}${source.filename}` : `Source ${index + 1}`;
+        const score = createElement("span", "source-score", supporting ? "" : `relevance ${source.score}`);
         heading.append(filename);
         if (!supporting && source.score != null) heading.append(score);
         item.append(heading);
-
-        const passages = Array.isArray(source.passages) && source.passages.length
-          ? source.passages
-          : [{ text: source.text }];
+        const passages = source.passages?.length ? source.passages : [{ text: source.text }];
         passages.forEach((passage, passageIndex) => {
-          const passageItem = document.createElement("div");
-          passageItem.className = "source-passage";
+          const passageItem = createElement("div", "source-passage");
           if (passages.length > 1) {
-            const passageLabel = document.createElement("p");
-            passageLabel.className = "source-passage-label";
-            passageLabel.textContent = `Cited passage ${passageIndex + 1}`;
-            passageItem.append(passageLabel);
+            passageItem.append(createElement("p", "source-passage-label", `Cited passage ${passageIndex + 1}`));
           }
-          const excerpt = document.createElement("p");
-          excerpt.className = "source-text";
+          const excerpt = createElement("p", "source-text");
           const fullText = (passage.text || "No excerpt returned.").trim();
           const previewText = compactSourceText(fullText);
           excerpt.textContent = previewText;
           passageItem.append(excerpt);
           if (previewText !== fullText) {
-            const toggle = document.createElement("button");
-            toggle.className = "source-toggle";
+            const toggle = createElement("button", "source-toggle");
             toggle.type = "button";
             toggle.textContent = "Show more";
             toggle.setAttribute("aria-expanded", "false");
@@ -706,18 +356,12 @@
     }
 
     function appendThinking() {
-      const item = document.createElement("article");
-      item.className = "message assistant";
+      const item = createElement("article", "message assistant");
       item.id = "thinking";
-      const avatar = document.createElement("div");
-      avatar.className = "avatar";
-      avatar.textContent = "AI";
-      const body = document.createElement("div");
-      const label = document.createElement("p");
-      label.className = "message-role";
-      label.textContent = "Searching documents";
-      const dots = document.createElement("div");
-      dots.className = "thinking";
+      const avatar = createElement("div", "avatar", "AI");
+      const body = createElement("div");
+      const label = createElement("p", "message-role", "Searching documents");
+      const dots = createElement("div", "thinking");
       dots.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
       body.append(label, dots);
       item.append(avatar, body);
@@ -732,24 +376,25 @@
         return;
       }
       if (state.busy) return;
-
       state.busy = true;
       elements.send.disabled = true;
       elements.message.disabled = true;
       appendMessage("user", question);
       appendThinking();
       setStatus("Generating answer…");
-
       try {
-        const response = await fetch(`/${elements.mode.value}`, {
+        const payload = await requestJson(`/${elements.mode.value}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ index_id: indexId, message: question, history: state.history })
         });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(errorDetail(response, payload));
         document.querySelector("#thinking")?.remove();
-        appendMessage("assistant", payload.answer, payload.sources || [], payload);
+        appendMessage(
+          "assistant",
+          payload.answer,
+          payload.sources || [],
+          payload.agent || payload
+        );
         state.history.push(
           { role: "user", content: question },
           {
@@ -772,7 +417,6 @@
         elements.message.focus();
       }
     }
-
     elements.form.addEventListener("submit", event => {
       event.preventDefault();
       const question = elements.message.value.trim();
@@ -781,7 +425,6 @@
       elements.message.style.height = "auto";
       sendMessage(question);
     });
-
     elements.message.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -792,7 +435,6 @@
       elements.message.style.height = "auto";
       elements.message.style.height = `${elements.message.scrollHeight}px`;
     });
-
     elements.uploadForm.addEventListener("submit", async event => {
       event.preventDefault();
       if (!elements.files.files.length) return;
@@ -803,9 +445,7 @@
       elements.uploadButton.textContent = "Indexing…";
       setStatus("Indexing documents…");
       try {
-        const response = await fetch("/indexes", { method: "POST", body: formData });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(errorDetail(response, payload));
+        const payload = await requestJson("/indexes", { method: "POST", body: formData });
         elements.uploadForm.reset();
         await loadCollections(payload.index_id);
         setStatus(`Created ${payload.index_id}`, "ok");
@@ -816,7 +456,6 @@
         elements.uploadButton.textContent = "Create collection";
       }
     });
-
     elements.clear.addEventListener("click", () => {
       state.history = [];
       elements.messages.querySelectorAll(".message").forEach(item => item.remove());
@@ -835,7 +474,6 @@
         elements.message.focus();
       });
     });
-
     loadCollections();
   </script>
 </body>

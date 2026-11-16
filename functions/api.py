@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
-from time import perf_counter
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -23,7 +22,7 @@ from .rag import (
     sanitize_index_id,
     update_registry,
 )
-from .telemetry import log_query_result, summarize_events
+from .telemetry import summarize_events
 
 
 CHAT_PAGE = Path(__file__).with_name("static") / "chat.html"
@@ -91,6 +90,11 @@ def create_index(
 
     validate_upload_metadata(files)
     safe_index_id = sanitize_index_id(_default_index_id(index_id, files))
+    if safe_index_id in load_registry():
+        raise HTTPException(
+            status_code=409,
+            detail="A collection with this name already exists; delete it before recreating it",
+        )
 
     staging_dir = _new_staging_dir(safe_index_id)
     try:
@@ -127,35 +131,25 @@ def delete_index(index_id: str) -> dict:
 
 @app.post("/chat")
 def chat(request: ChatRequest) -> dict:
-    if not request.message.strip():
-        raise HTTPException(status_code=400, detail="Message is required")
-    safe_index_id = _existing_index_id(request.index_id)
-    try:
-        started = perf_counter()
-        index = load_index(safe_index_id)
-        result = ask_index_with_sources(
-            index, request.message, [turn.model_dump() for turn in request.history]
-        )
-        log_query_result(
-            mode="single", iterations=1, latency_ms=(perf_counter() - started) * 1000
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
-    return result
+    return _answer(request, ask_index_with_sources, "Chat")
 
 
 @app.post("/agent")
 def agent(request: ChatRequest) -> dict:
+    return _answer(request, run_agent, "Agent")
+
+
+def _answer(request: ChatRequest, responder, label: str) -> dict:
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
     safe_index_id = _existing_index_id(request.index_id)
     try:
         index = load_index(safe_index_id)
-        return run_agent(
+        return responder(
             index, request.message, [turn.model_dump() for turn in request.history]
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Agent failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"{label} failed: {exc}") from exc
 
 
 @app.post("/retrieve")
@@ -225,7 +219,15 @@ def _existing_index_id(index_id: str) -> str:
 def validate_upload_metadata(files: list[UploadFile]) -> None:
     limit = max_upload_bytes()
     declared_total = 0
+    filenames = set()
     for upload in files:
+        safe_filename = Path(upload.filename or "").name.casefold()
+        if safe_filename in filenames:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate upload filename: {upload.filename}",
+            )
+        filenames.add(safe_filename)
         suffix = Path(upload.filename or "").suffix.lower()
         if suffix not in ALLOWED_UPLOAD_TYPES:
             raise HTTPException(

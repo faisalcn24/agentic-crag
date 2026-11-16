@@ -1,0 +1,497 @@
+{
+  "protocol": {
+    "corrective_modes": [
+      "on"
+    ],
+    "runs_per_question": 1,
+    "generation_provider": "ollama",
+    "generation_model": "qwen3:8b",
+    "planner_model": "qwen3:8b",
+    "temperature": 0,
+    "judge": "manual_codex_review",
+    "judge_model": null,
+    "tolerance_points": 3,
+    "index_fingerprint": "1b863ba9ffcbc57da76633d465647e05a7063c5572f897b19863a75195107ecc",
+    "run_fingerprint": "2faf1e6474077b7b3bcd43d7e42ca8f70d7153f41ee162ae5a7856292e18aff4",
+    "rubric": {
+      "judge": "Direct review by the Codex assistant; no judge model or metric LLM.",
+      "ragas.context_precision": "RAGAS-style average precision evaluated separately for each retrieval-query leg, then averaged across legs. Reset rank at each query and de-duplicate identical filename/text chunks within that leg, so a corrective leg is not treated as if it were appended below the initial ranking. The hand-labeled expected_source documents define relevance. Use 0 for a leg with no expected-source context.",
+      "ragas.context_recall": "Fraction of hand-labeled expected_source documents represented anywhere in the retrieval trace.",
+      "ragas.faithfulness": "Fraction of factual claims in the actual answer supported by the retrieval trace. Use 1 for an answer containing no unsupported factual claims and 0 for a wrong abstention on an answerable case.",
+      "deepeval.answer_correctness": "Fraction of required expected-answer facts stated correctly, with unsupported or contradictory additions reducing the score.",
+      "deepeval.hallucination_rate": "Fraction of actual-answer factual claims that are unsupported by or contradict the retrieved evidence. Lower is better.",
+      "deepeval.citation_accuracy": "Fraction of factual claims whose adjacent filename citations point to passages that support those claims. Missing required citations score 0.",
+      "custom.abstention_accuracy": "Binary: 1 when an unanswerable case abstains, or an adversarial case refuses, corrects the false premise, or flags and ignores an injection as expected; else 0."
+    }
+  },
+  "summary": {
+    "generated_at": "2026-08-13T15:27:05.689439+00:00",
+    "review_status": "pending_manual_review",
+    "judge": null,
+    "modes": {
+      "on": {
+        "trials": 3,
+        "generation_errors": 0,
+        "mean_latency_ms": 22915.964000000004,
+        "p50_latency_ms": 22531.055,
+        "p95_latency_ms": 27347.5544,
+        "mean_token_usage": 1158.6666666666667,
+        "total_token_usage": 3476,
+        "api_cost_usd": 0.0,
+        "correction_fire_rate": 0.0,
+        "correction_completion_rate": 0.0,
+        "correction_new_evidence_rate": 0.0
+      }
+    },
+    "tolerance_points": 3
+  },
+  "trials": [
+    {
+      "trial_id": "on:golden:multi-003:run-1",
+      "suite": "golden",
+      "case_id": "multi-003",
+      "stratum": "multi-hop",
+      "case_type": null,
+      "corrective": "on",
+      "repetition": 1,
+      "question": "How did source visibility change from version 2.2 to version 2.4?",
+      "expected_answer": "Version 2.2 returned only answer text and did not expose source snippets; version 2.4 added a sources list and displayed snippets in the UI.",
+      "expected_source": [
+        "04_release_notes.docx"
+      ],
+      "answer_should_exist": true,
+      "expected_behavior": null,
+      "answer": "Here's the breakdown:\n\n## What source visibility was documented for version 2.2\n- Version 2.2 introduced saved collections and a registry file for local metadata [04_release_notes.docx].\n\n## What source visibility was documented for version 2.4\n- Version 2.4 added structured source reporting to chat responses [04_release_notes.docx].",
+      "sources": [
+        {
+          "filename": "04_release_notes.docx",
+          "type": "docx",
+          "text": "Version 2.2 introduced saved collections and a registry file for local metadata.\n\nVersion 2.4 added structured source reporting to chat responses.",
+          "passages": [
+            {
+              "text": "Version 2.2 introduced saved collections and a registry file for local metadata."
+            },
+            {
+              "text": "Version 2.4 added structured source reporting to chat responses."
+            }
+          ]
+        }
+      ],
+      "retrieval_trace": [
+        {
+          "query": "What source visibility was documented for version 2.2?",
+          "rank": 1,
+          "filename": "04_release_notes.docx",
+          "type": "docx",
+          "score": 0.0185,
+          "text": "Document filename: 04_release_notes.docx Agentic CRAG Release Notes Versions 2.2, 2.3, and 2.4 - Demo Corpus Version 2.2 Version 2.2 introduced saved collections and a registry file for local metadata. The registry stores folder_path, folder_name, and a list of document filenames and types. Version 2.2 used simple chat responses that returned only answer text. Source snippets were not yet exposed to the UI. Version 2.2 supported PDF, DOCX, and XLSX uploads. Legacy XLS files were allowed by extension but were not reliable because the parser expected openpyxl-compatible files. Version 2.3 Version 2.3 added AWS hybrid deployment documentation. The deployment used EC2, systemd, and Nginx. Version 2.3 clarified that public demo documents should be used because retrieved excerpts are sent to Groq in hybrid mode. Version 2.3 added a default local storage recommendation of .agentic_crag_data for Windows development and /opt/agentic-crag/data for EC2 deployment. Version 2.4 Version 2.4 added structured source reporting to chat responses. The chat response now includes an answer field and a sources list. Version 2.4 added a retrieval debugging endpoint named POST /retrieve. The endpoint returns source snippets without calling the language model. Version 2.4 updated Streamlit to display source snippets in a Sources expander under assistant responses. Version 2.4 added regression coverage for source formatting behavior. Version 2.4 did not add reranking or hybrid BM25 search because the deployment target was a small EC2 instance and the goal was minimal code. Compatibility Notes Collections built before a chunking or embedding change should be rebuilt to ensure retrieval uses the current settings. Changing from Groq to a local Ollama model can alter answer style, even when the same base model family is used. Groq model name llama-3.1-8b-instant refers to a hosted serving configuration. The closest local Ollama model family is llama3.1:8b, but outputs may differ."
+        },
+        {
+          "query": "What source visibility was documented for version 2.2?",
+          "rank": 2,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0001,
+          "text": "Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evaluation, with the understanding that indexing may be slower on very small machines. NFR-002: The browser interface should remain simple enough for a non-technical evaluator to upload documents and ask questions without setup instructions inside the app. NFR-003: The backend should expose explicit health checks so deployment problems can be diagnosed through curl before testing the UI. NFR-004: The repository should be small, clean, and free of generated local artifacts. NFR-005: The application should make retrieval evidence visible to reduce hallucination risk and improve trust. Known Scope Boundaries The current release does not include authentication. Public demo deployments should only be used temporarily or behind a controlled network. The current release does not include reranking. Retrieval uses vector similarity and a small top-k value suitable for a lightweight demo. The current release does not include hybrid BM25 plus vector search. Exact identifier queries may be improved in a future version. The current release does not process scanned PDFs with OCR. Text must be extractable from the uploaded files. The current release does not store collections in S3 or a managed vector database. Local disk is used for simplicity and cost control. Acceptance Criteria A reviewer can upload the full demo corpus and ask: What is FR-006? The answer should mention the retrieval-only endpoint and cite this product requirements document. A reviewer can ask whether authentication is included. The answer should state that authentication is not included in the current release. A reviewer can ask what success target is defined for fact-seeking questions. The answer should report the 85 percent target. A reviewer can ask whether scanned PDFs are supported. The answer should say OCR is not included and text must be extractable."
+        },
+        {
+          "query": "What source visibility was documented for version 2.2?",
+          "rank": 3,
+          "filename": "03_rag_evaluation_plan.docx",
+          "type": "docx",
+          "score": 0.0001,
+          "text": "For source transparency, at least 80 percent of correct answers should show a supporting source snippet. For answer-not-present questions, the system should avoid inventing facts at least 90 percent of the time. For numeric spreadsheet questions, the system should report exact values from the workbook and avoid rounding unless asked. Failure Modes to Watch The retriever may return a semantically similar but wrong document when multiple files discuss the same feature. The model may cite a filename even when the retrieved snippet does not support the statement. Spreadsheet rows may be missed if a sheet is too large and relevant rows are split away from headers. The answer model may over-answer when the user asks about information that is absent from the corpus. Very broad questions may retrieve generic overview chunks instead of the most specific operational details. Recommended Improvements After Baseline Add a small evals folder with question, expected answer, expected source, and answer_should_exist fields. Add a retrieval-only test that calls /retrieve and checks whether expected sources appear in the top five results. Add reranking if the vector retriever returns plausible but weak context. Add hybrid keyword and vector search if exact IDs, codes, or named clauses are often missed. Add stronger PDF parsing or OCR only if the target documents require it."
+        },
+        {
+          "query": "What source visibility was documented for version 2.2?",
+          "rank": 4,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0001,
+          "text": "Document filename: 01_product_requirements.docx Agentic CRAG Product Requirements Document Version 2.4 - Demo Corpus Executive Summary Agentic CRAG is a document assistant for retrieval augmented generation over uploaded business documents. The product goal is to let a user upload project material, create a searchable collection, and ask grounded questions with visible source evidence. The demo release is designed for small to medium public documents. It is not intended for confidential legal, medical, financial, or customer records because the final language model answer may be generated by an external model provider. The product success target for the demo is to answer at least 85 percent of fact-seeking test questions correctly when the answer exists in the uploaded documents, while refusing unsupported questions when the answer is absent. Personas The primary persona is an early-career analyst who has several PDFs, Word files, and spreadsheets and wants quick answers without reading every page manually. The secondary persona is a recruiter or technical reviewer evaluating whether the project demonstrates practical RAG engineering, deployment awareness, and clear explanation of tradeoffs. The tertiary persona is a project manager who wants comparison summaries across release notes, budgets, risk logs, and deployment documents. Functional Requirements FR-001: The system shall accept PDF, DOCX, and XLSX uploads through a browser user interface. FR-002: The system shall create named searchable collections. A collection name must be sanitized before it is used as a storage path. FR-003: The system shall preserve uploaded source files under local storage so a collection can be reloaded after service restart. FR-004: The system shall use local embeddings to avoid sending full documents to the answer generation model. FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved. FR-006: The system shall expose a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. FR-007: The system shall warn users that AWS hybrid mode sends retrieved excerpts to Groq for final answer generation. FR-008: The system shall keep API keys, uploaded documents, and generated indexes out of Git. Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evalu..."
+        },
+        {
+          "query": "What source visibility was documented for version 2.2?",
+          "rank": 5,
+          "filename": "02_aws_deployment_runbook.docx",
+          "type": "docx",
+          "score": 0.0,
+          "text": "Health Checks The backend direct health check is curl http://127.0.0.1:8000/health. The Nginx-routed health check is curl http://127.0.0.1/api/health. If the backend direct health check works but the Nginx-routed health check returns 404, the Nginx site is probably not linked, the default site is still enabled, or Nginx was not reloaded. If SSH times out, check the instance state, public IPv4 address, route table, network ACL, and security group source IP. If SSH reports bad key permissions on Windows, move the PEM file to the .ssh folder and restrict file access to the current Windows user. Operational Commands View API logs with sudo journalctl -u agentic-crag-api -f. View UI logs with sudo journalctl -u agentic-crag-ui -f. Validate Nginx config with sudo nginx -t before reloading Nginx. Update the deployed application with cd /opt/agentic-crag/app followed by bash deploy/update_app.sh. Stop the instance when not demonstrating the project to reduce cost. Runbook-Specific Facts The canonical EC2 storage path for this demo is /opt/agentic-crag/data. The canonical public web port is 80, not 8501. The canonical backend port is 8000, but it should only bind to localhost. The canonical UI port is 8501, but it should only bind to localhost. The intended service names are agentic-crag-api and agentic-crag-ui."
+        },
+        {
+          "query": "What source visibility was documented for version 2.4?",
+          "rank": 1,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0546,
+          "text": "Document filename: 01_product_requirements.docx Agentic CRAG Product Requirements Document Version 2.4 - Demo Corpus Executive Summary Agentic CRAG is a document assistant for retrieval augmented generation over uploaded business documents. The product goal is to let a user upload project material, create a searchable collection, and ask grounded questions with visible source evidence. The demo release is designed for small to medium public documents. It is not intended for confidential legal, medical, financial, or customer records because the final language model answer may be generated by an external model provider. The product success target for the demo is to answer at least 85 percent of fact-seeking test questions correctly when the answer exists in the uploaded documents, while refusing unsupported questions when the answer is absent. Personas The primary persona is an early-career analyst who has several PDFs, Word files, and spreadsheets and wants quick answers without reading every page manually. The secondary persona is a recruiter or technical reviewer evaluating whether the project demonstrates practical RAG engineering, deployment awareness, and clear explanation of tradeoffs. The tertiary persona is a project manager who wants comparison summaries across release notes, budgets, risk logs, and deployment documents. Functional Requirements FR-001: The system shall accept PDF, DOCX, and XLSX uploads through a browser user interface. FR-002: The system shall create named searchable collections. A collection name must be sanitized before it is used as a storage path. FR-003: The system shall preserve uploaded source files under local storage so a collection can be reloaded after service restart. FR-004: The system shall use local embeddings to avoid sending full documents to the answer generation model. FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved. FR-006: The system shall expose a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. FR-007: The system shall warn users that AWS hybrid mode sends retrieved excerpts to Groq for final answer generation. FR-008: The system shall keep API keys, uploaded documents, and generated indexes out of Git. Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evalu..."
+        },
+        {
+          "query": "What source visibility was documented for version 2.4?",
+          "rank": 2,
+          "filename": "04_release_notes.docx",
+          "type": "docx",
+          "score": 0.0168,
+          "text": "Document filename: 04_release_notes.docx Agentic CRAG Release Notes Versions 2.2, 2.3, and 2.4 - Demo Corpus Version 2.2 Version 2.2 introduced saved collections and a registry file for local metadata. The registry stores folder_path, folder_name, and a list of document filenames and types. Version 2.2 used simple chat responses that returned only answer text. Source snippets were not yet exposed to the UI. Version 2.2 supported PDF, DOCX, and XLSX uploads. Legacy XLS files were allowed by extension but were not reliable because the parser expected openpyxl-compatible files. Version 2.3 Version 2.3 added AWS hybrid deployment documentation. The deployment used EC2, systemd, and Nginx. Version 2.3 clarified that public demo documents should be used because retrieved excerpts are sent to Groq in hybrid mode. Version 2.3 added a default local storage recommendation of .agentic_crag_data for Windows development and /opt/agentic-crag/data for EC2 deployment. Version 2.4 Version 2.4 added structured source reporting to chat responses. The chat response now includes an answer field and a sources list. Version 2.4 added a retrieval debugging endpoint named POST /retrieve. The endpoint returns source snippets without calling the language model. Version 2.4 updated Streamlit to display source snippets in a Sources expander under assistant responses. Version 2.4 added regression coverage for source formatting behavior. Version 2.4 did not add reranking or hybrid BM25 search because the deployment target was a small EC2 instance and the goal was minimal code. Compatibility Notes Collections built before a chunking or embedding change should be rebuilt to ensure retrieval uses the current settings. Changing from Groq to a local Ollama model can alter answer style, even when the same base model family is used. Groq model name llama-3.1-8b-instant refers to a hosted serving configuration. The closest local Ollama model family is llama3.1:8b, but outputs may differ."
+        },
+        {
+          "query": "What source visibility was documented for version 2.4?",
+          "rank": 3,
+          "filename": "03_rag_evaluation_plan.docx",
+          "type": "docx",
+          "score": 0.0001,
+          "text": "For source transparency, at least 80 percent of correct answers should show a supporting source snippet. For answer-not-present questions, the system should avoid inventing facts at least 90 percent of the time. For numeric spreadsheet questions, the system should report exact values from the workbook and avoid rounding unless asked. Failure Modes to Watch The retriever may return a semantically similar but wrong document when multiple files discuss the same feature. The model may cite a filename even when the retrieved snippet does not support the statement. Spreadsheet rows may be missed if a sheet is too large and relevant rows are split away from headers. The answer model may over-answer when the user asks about information that is absent from the corpus. Very broad questions may retrieve generic overview chunks instead of the most specific operational details. Recommended Improvements After Baseline Add a small evals folder with question, expected answer, expected source, and answer_should_exist fields. Add a retrieval-only test that calls /retrieve and checks whether expected sources appear in the top five results. Add reranking if the vector retriever returns plausible but weak context. Add hybrid keyword and vector search if exact IDs, codes, or named clauses are often missed. Add stronger PDF parsing or OCR only if the target documents require it."
+        },
+        {
+          "query": "What source visibility was documented for version 2.4?",
+          "rank": 4,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0001,
+          "text": "Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evaluation, with the understanding that indexing may be slower on very small machines. NFR-002: The browser interface should remain simple enough for a non-technical evaluator to upload documents and ask questions without setup instructions inside the app. NFR-003: The backend should expose explicit health checks so deployment problems can be diagnosed through curl before testing the UI. NFR-004: The repository should be small, clean, and free of generated local artifacts. NFR-005: The application should make retrieval evidence visible to reduce hallucination risk and improve trust. Known Scope Boundaries The current release does not include authentication. Public demo deployments should only be used temporarily or behind a controlled network. The current release does not include reranking. Retrieval uses vector similarity and a small top-k value suitable for a lightweight demo. The current release does not include hybrid BM25 plus vector search. Exact identifier queries may be improved in a future version. The current release does not process scanned PDFs with OCR. Text must be extractable from the uploaded files. The current release does not store collections in S3 or a managed vector database. Local disk is used for simplicity and cost control. Acceptance Criteria A reviewer can upload the full demo corpus and ask: What is FR-006? The answer should mention the retrieval-only endpoint and cite this product requirements document. A reviewer can ask whether authentication is included. The answer should state that authentication is not included in the current release. A reviewer can ask what success target is defined for fact-seeking questions. The answer should report the 85 percent target. A reviewer can ask whether scanned PDFs are supported. The answer should say OCR is not included and text must be extractable."
+        },
+        {
+          "query": "What source visibility was documented for version 2.4?",
+          "rank": 5,
+          "filename": "02_aws_deployment_runbook.docx",
+          "type": "docx",
+          "score": 0.0,
+          "text": "Health Checks The backend direct health check is curl http://127.0.0.1:8000/health. The Nginx-routed health check is curl http://127.0.0.1/api/health. If the backend direct health check works but the Nginx-routed health check returns 404, the Nginx site is probably not linked, the default site is still enabled, or Nginx was not reloaded. If SSH times out, check the instance state, public IPv4 address, route table, network ACL, and security group source IP. If SSH reports bad key permissions on Windows, move the PEM file to the .ssh folder and restrict file access to the current Windows user. Operational Commands View API logs with sudo journalctl -u agentic-crag-api -f. View UI logs with sudo journalctl -u agentic-crag-ui -f. Validate Nginx config with sudo nginx -t before reloading Nginx. Update the deployed application with cd /opt/agentic-crag/app followed by bash deploy/update_app.sh. Stop the instance when not demonstrating the project to reduce cost. Runbook-Specific Facts The canonical EC2 storage path for this demo is /opt/agentic-crag/data. The canonical public web port is 80, not 8501. The canonical backend port is 8000, but it should only bind to localhost. The canonical UI port is 8501, but it should only bind to localhost. The intended service names are agentic-crag-api and agentic-crag-ui."
+        }
+      ],
+      "control_trace": [
+        {
+          "node": "evidence_coverage",
+          "output": "{\"coverage\":[{\"subquery\":\"What source visibility was documented for version 2.2?\",\"covered\":true,\"filename\":\"04_release_notes.docx\",\"quote\":\"Version 2.2 introduced saved collections and a registry file for local metadata.\"},{\"subquery\":\"What source visibility was documented for version 2.4?\",\"covered\":true,\"filename\":\"04_release_notes.docx\",\"quote\":\"Version 2.4 added structured source reporting to chat responses. Version 2.4 updated Streamlit to display source snippets in a Sources expander under assistant responses.\"}]}",
+          "tokens": 811
+        }
+      ],
+      "agent": {
+        "iterations": 2,
+        "confidence": "medium",
+        "termination_reason": "answered",
+        "query_history": [
+          "What source visibility was documented for version 2.2?",
+          "What source visibility was documented for version 2.4?"
+        ],
+        "token_usage": 811,
+        "prompt_injection_flagged": false,
+        "corrective_pass_used": false,
+        "corrective_pass_triggered": false,
+        "corrective_fallback_used": false,
+        "corrective_new_evidence": false,
+        "corrective_recovered": false,
+        "missing_subquestions": [],
+        "latency_ms": 27882.721
+      },
+      "generation_error": null,
+      "api_cost_usd": 0.0,
+      "run_fingerprint": "2faf1e6474077b7b3bcd43d7e42ca8f70d7153f41ee162ae5a7856292e18aff4"
+    },
+    {
+      "trial_id": "on:golden:multi-006:run-1",
+      "suite": "golden",
+      "case_id": "multi-006",
+      "stratum": "multi-hop",
+      "case_type": null,
+      "corrective": "on",
+      "repetition": 1,
+      "question": "Connect risk R-002 with the matching recorded incident and fix.",
+      "expected_answer": "R-002 is the Nginx /api/health 404 risk; incident I-004 recorded that symptom and fixed it by installing/linking the agentic-crag site and reloading Nginx.",
+      "expected_source": [
+        "06_risk_register_and_incidents.xlsx-Risk Register",
+        "06_risk_register_and_incidents.xlsx-Incident Log"
+      ],
+      "answer_should_exist": true,
+      "expected_behavior": null,
+      "answer": "Here's the breakdown:\n\n## What does risk R-002 state\n- Risk_ID: R-002 | Risk: Nginx route returns 404 for /api/health | Probability: 0.35 | Impact: Medium | Owner: Deployment | Mitigation: Link agentic-crag site, remove default site, validate nginx -t, reload nginx | Status: Mitigated [06_risk_register_and_incidents.xlsx-Risk Register].\n\n## What evidence describes the matching recorded incident and fix\n- Incident_ID: I-004 | Date: 2026-06-14 | Symptom: curl /api/health returned Nginx 404 | Root_Cause: Nginx default or inactive site config | Fix: Install/link agentic-crag Nginx config and reload service [06_risk_register_and_incidents.xlsx-Incident Log].",
+      "sources": [
+        {
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "text": "Risk_ID: R-002 | Risk: Nginx route returns 404 for /api/health | Probability: 0.35 | Impact: Medium | Owner: Deployment | Mitigation: Link agentic-crag site, remove default site, validate nginx -t, reload nginx | Status: Mitigated",
+          "passages": [
+            {
+              "text": "Risk_ID: R-002 | Risk: Nginx route returns 404 for /api/health | Probability: 0.35 | Impact: Medium | Owner: Deployment | Mitigation: Link agentic-crag site, remove default site, validate nginx -t, reload nginx | Status: Mitigated"
+            }
+          ]
+        },
+        {
+          "filename": "06_risk_register_and_incidents.xlsx-Incident Log",
+          "type": "xlsx",
+          "text": "Incident_ID: I-004 | Date: 2026-06-14 | Symptom: curl /api/health returned Nginx 404 | Root_Cause: Nginx default or inactive site config | Fix: Install/link agentic-crag Nginx config and reload service",
+          "passages": [
+            {
+              "text": "Incident_ID: I-004 | Date: 2026-06-14 | Symptom: curl /api/health returned Nginx 404 | Root_Cause: Nginx default or inactive site config | Fix: Install/link agentic-crag Nginx config and reload service"
+            }
+          ]
+        }
+      ],
+      "retrieval_trace": [
+        {
+          "query": "What evidence describes the matching recorded incident and fix?",
+          "rank": 1,
+          "filename": "06_risk_register_and_incidents.xlsx-Incident Log",
+          "type": "xlsx",
+          "score": 0.0007,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Incident Log\nIncident_ID: I-001 | Date: 2026-06-14 | Symptom: SSH connection timed out | Root_Cause: Security group allowed old public IP address | Fix: Updated SSH inbound source to current public IPv4 /32"
+        },
+        {
+          "query": "What evidence describes the matching recorded incident and fix?",
+          "rank": 2,
+          "filename": "06_risk_register_and_incidents.xlsx-Incident Log",
+          "type": "xlsx",
+          "score": 0.0006,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Incident Log\nIncident_ID: I-003 | Date: 2026-06-14 | Symptom: pip failed on pywinpty | Root_Cause: Old repository requirements included Windows-only dependency | Fix: Cleaned requirements and pushed deployment repo"
+        },
+        {
+          "query": "What evidence describes the matching recorded incident and fix?",
+          "rank": 3,
+          "filename": "06_risk_register_and_incidents.xlsx-Incident Log",
+          "type": "xlsx",
+          "score": 0.0006,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Incident Log\nIncident_ID: I-004 | Date: 2026-06-14 | Symptom: curl /api/health returned Nginx 404 | Root_Cause: Nginx default or inactive site config | Fix: Install/link agentic-crag Nginx config and reload service"
+        },
+        {
+          "query": "What evidence describes the matching recorded incident and fix?",
+          "rank": 4,
+          "filename": "03_rag_evaluation_plan.docx",
+          "type": "docx",
+          "score": 0.0006,
+          "text": "Document filename: 03_rag_evaluation_plan.docx Agentic CRAG RAG Evaluation Plan Quality and Stress Testing - Demo Corpus Evaluation Goals The evaluation plan tests whether the RAG system retrieves the right evidence, answers faithfully, cites useful sources, and refuses unsupported questions. The system should be tested with exact fact questions, numeric spreadsheet questions, multi-document comparison questions, ambiguous questions, and answer-not-present questions. A good result is not only a fluent answer. The retrieved source snippet must support the answer. Primary Metrics Recall@5 measures whether the expected source appears in the top five retrieved chunks. Citation accuracy measures whether the source shown under the answer actually supports the answer. Answer correctness measures whether the final response matches the expected answer. Faithfulness measures whether the final response is fully grounded in retrieved context. Abstention accuracy measures whether the system refuses questions whose answers are absent from the documents. Latency measures indexing time, retrieval time, and full chat response time. Stress Test Questions Question A: What does FR-006 require? Expected source: product requirements document. Expected answer: a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. Question B: What path stores data on EC2? Expected source: AWS deployment runbook. Expected answer: /opt/agentic-crag/data. Question C: What is the Q3 Groq API budget? Expected source: budget workbook. Expected answer: 75 dollars. Question D: Which risk has the highest probability score? Expected source: risk workbook. Expected answer: R-004, missing source citations, probability 0.70. Question E: Is authentication included in the current release? Expected source: product requirements document. Expected answer: no, authentication is not included. Question F: What is the company payroll for 2026? Expected answer: not present in the documents, so the system should abstain. Pass Criteria For a recruiter demo, the system should achieve at least 80 percent answer correctness on the curated test questions. For source transparency, at least 80 percent of correct answers should show a supporting source snippet. For answer-not-present questions, the system should avoid inventing facts at least 90 percent of the time."
+        },
+        {
+          "query": "What evidence describes the matching recorded incident and fix?",
+          "rank": 5,
+          "filename": "06_risk_register_and_incidents.xlsx-Incident Log",
+          "type": "xlsx",
+          "score": 0.0004,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Incident Log\nIncident_ID: I-002 | Date: 2026-06-14 | Symptom: SSH rejected PEM file | Root_Cause: Windows key file permissions too open | Fix: Moved key to .ssh and restricted ACLs"
+        },
+        {
+          "query": "What does risk R-002 state?",
+          "rank": 1,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0517,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-002 | Risk: Nginx route returns 404 for /api/health | Probability: 0.35 | Impact: Medium | Owner: Deployment | Mitigation: Link agentic-crag site, remove default site, validate nginx -t, reload nginx | Status: Mitigated"
+        },
+        {
+          "query": "What does risk R-002 state?",
+          "rank": 2,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0307,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-006 | Risk: Spreadsheet answers omit rows | Probability: 0.3 | Impact: High | Owner: RAG | Mitigation: Use larger spreadsheet chunks and test numeric questions | Status: Monitoring"
+        },
+        {
+          "query": "What does risk R-002 state?",
+          "rank": 3,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.003,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-003 | Risk: Wrong public IP in SSH security group | Probability: 0.4 | Impact: High | Owner: Deployment | Mitigation: Update inbound SSH source to current public IPv4 /32 | Status: Mitigated"
+        },
+        {
+          "query": "What does risk R-002 state?",
+          "rank": 4,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.002,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-001 | Risk: Small EC2 instance runs out of memory during dependency install | Probability: 0.45 | Impact: Medium | Owner: Deployment | Mitigation: Add 2 GB swap and keep dependencies lean | Status: Mitigated"
+        },
+        {
+          "query": "What does risk R-002 state?",
+          "rank": 5,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0018,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-007 | Risk: User uploads confidential files to hybrid demo | Probability: 0.25 | Impact: High | Owner: Security | Mitigation: Warn that retrieved excerpts are sent to external LLM provider | Status: Mitigated"
+        }
+      ],
+      "control_trace": [
+        {
+          "node": "synthesis",
+          "output": "Risk R-002, which involves the Nginx route returning 404 for /api/health, is connected to the incident I-004, where the symptom was curl /api/health returned Nginx 404, and the fix involved installing/linking the agentic-crag Nginx config and reloading the service. The mitigation for R-002 aligns with the fix for I-004.",
+          "tokens": 1095
+        }
+      ],
+      "agent": {
+        "iterations": 2,
+        "confidence": "medium",
+        "termination_reason": "answered",
+        "query_history": [
+          "What does risk R-002 state?",
+          "What evidence describes the matching recorded incident and fix?"
+        ],
+        "token_usage": 1095,
+        "prompt_injection_flagged": false,
+        "corrective_pass_used": false,
+        "corrective_pass_triggered": false,
+        "corrective_fallback_used": false,
+        "corrective_new_evidence": false,
+        "corrective_recovered": false,
+        "missing_subquestions": [],
+        "latency_ms": 18334.116
+      },
+      "generation_error": null,
+      "api_cost_usd": 0.0,
+      "run_fingerprint": "2faf1e6474077b7b3bcd43d7e42ca8f70d7153f41ee162ae5a7856292e18aff4"
+    },
+    {
+      "trial_id": "on:golden:multi-014:run-1",
+      "suite": "golden",
+      "case_id": "multi-014",
+      "stratum": "multi-hop",
+      "case_type": null,
+      "corrective": "on",
+      "repetition": 1,
+      "question": "How do FR-005 and risk R-004 describe the same trust control?",
+      "expected_answer": "FR-005 requires source snippets with answers, and R-004 mitigates missing-citation trust risk by returning source snippets and retrieval scores.",
+      "expected_source": [
+        "01_product_requirements.docx",
+        "06_risk_register_and_incidents.xlsx-Risk Register"
+      ],
+      "answer_should_exist": true,
+      "expected_behavior": null,
+      "answer": "Here's the breakdown:\n\n## What does FR-005 state that is relevant to the question\n- FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved [01_product_requirements.docx].\n\n## What does R-004 state that is relevant to the question\n- Risk_ID: R-004 | Risk: Missing source citations reduce trust in RAG answers | Probability: 0.7 | Impact: High | Owner: RAG | Mitigation: Return source snippets and retrieval scores in chat responses | Status: Mitigated [06_risk_register_and_incidents.xlsx-Risk Register].",
+      "sources": [
+        {
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "text": "FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved.",
+          "passages": [
+            {
+              "text": "FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved."
+            }
+          ]
+        },
+        {
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "text": "Risk_ID: R-004 | Risk: Missing source citations reduce trust in RAG answers | Probability: 0.7 | Impact: High | Owner: RAG | Mitigation: Return source snippets and retrieval scores in chat responses | Status: Mitigated",
+          "passages": [
+            {
+              "text": "Risk_ID: R-004 | Risk: Missing source citations reduce trust in RAG answers | Probability: 0.7 | Impact: High | Owner: RAG | Mitigation: Return source snippets and retrieval scores in chat responses | Status: Mitigated"
+            }
+          ]
+        }
+      ],
+      "retrieval_trace": [
+        {
+          "query": "What does FR-005 state that is relevant to the question?",
+          "rank": 1,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.402,
+          "text": "Document filename: 01_product_requirements.docx Agentic CRAG Product Requirements Document Version 2.4 - Demo Corpus Executive Summary Agentic CRAG is a document assistant for retrieval augmented generation over uploaded business documents. The product goal is to let a user upload project material, create a searchable collection, and ask grounded questions with visible source evidence. The demo release is designed for small to medium public documents. It is not intended for confidential legal, medical, financial, or customer records because the final language model answer may be generated by an external model provider. The product success target for the demo is to answer at least 85 percent of fact-seeking test questions correctly when the answer exists in the uploaded documents, while refusing unsupported questions when the answer is absent. Personas The primary persona is an early-career analyst who has several PDFs, Word files, and spreadsheets and wants quick answers without reading every page manually. The secondary persona is a recruiter or technical reviewer evaluating whether the project demonstrates practical RAG engineering, deployment awareness, and clear explanation of tradeoffs. The tertiary persona is a project manager who wants comparison summaries across release notes, budgets, risk logs, and deployment documents. Functional Requirements FR-001: The system shall accept PDF, DOCX, and XLSX uploads through a browser user interface. FR-002: The system shall create named searchable collections. A collection name must be sanitized before it is used as a storage path. FR-003: The system shall preserve uploaded source files under local storage so a collection can be reloaded after service restart. FR-004: The system shall use local embeddings to avoid sending full documents to the answer generation model. FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved. FR-006: The system shall expose a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. FR-007: The system shall warn users that AWS hybrid mode sends retrieved excerpts to Groq for final answer generation. FR-008: The system shall keep API keys, uploaded documents, and generated indexes out of Git. Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evalu..."
+        },
+        {
+          "query": "What does FR-005 state that is relevant to the question?",
+          "rank": 2,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.6089,
+          "text": "Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evaluation, with the understanding that indexing may be slower on very small machines. NFR-002: The browser interface should remain simple enough for a non-technical evaluator to upload documents and ask questions without setup instructions inside the app. NFR-003: The backend should expose explicit health checks so deployment problems can be diagnosed through curl before testing the UI. NFR-004: The repository should be small, clean, and free of generated local artifacts. NFR-005: The application should make retrieval evidence visible to reduce hallucination risk and improve trust. Known Scope Boundaries The current release does not include authentication. Public demo deployments should only be used temporarily or behind a controlled network. The current release does not include reranking. Retrieval uses vector similarity and a small top-k value suitable for a lightweight demo. The current release does not include hybrid BM25 plus vector search. Exact identifier queries may be improved in a future version. The current release does not process scanned PDFs with OCR. Text must be extractable from the uploaded files. The current release does not store collections in S3 or a managed vector database. Local disk is used for simplicity and cost control. Acceptance Criteria A reviewer can upload the full demo corpus and ask: What is FR-006? The answer should mention the retrieval-only endpoint and cite this product requirements document. A reviewer can ask whether authentication is included. The answer should state that authentication is not included in the current release. A reviewer can ask what success target is defined for fact-seeking questions. The answer should report the 85 percent target. A reviewer can ask whether scanned PDFs are supported. The answer should say OCR is not included and text must be extractable."
+        },
+        {
+          "query": "What does FR-005 state that is relevant to the question?",
+          "rank": 3,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0701,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-005 | Risk: Pure vector retrieval misses exact IDs or codes | Probability: 0.55 | Impact: Medium | Owner: RAG | Mitigation: Consider hybrid keyword plus vector search in future | Status: Open"
+        },
+        {
+          "query": "What does FR-005 state that is relevant to the question?",
+          "rank": 4,
+          "filename": "03_rag_evaluation_plan.docx",
+          "type": "docx",
+          "score": 0.011,
+          "text": "Document filename: 03_rag_evaluation_plan.docx Agentic CRAG RAG Evaluation Plan Quality and Stress Testing - Demo Corpus Evaluation Goals The evaluation plan tests whether the RAG system retrieves the right evidence, answers faithfully, cites useful sources, and refuses unsupported questions. The system should be tested with exact fact questions, numeric spreadsheet questions, multi-document comparison questions, ambiguous questions, and answer-not-present questions. A good result is not only a fluent answer. The retrieved source snippet must support the answer. Primary Metrics Recall@5 measures whether the expected source appears in the top five retrieved chunks. Citation accuracy measures whether the source shown under the answer actually supports the answer. Answer correctness measures whether the final response matches the expected answer. Faithfulness measures whether the final response is fully grounded in retrieved context. Abstention accuracy measures whether the system refuses questions whose answers are absent from the documents. Latency measures indexing time, retrieval time, and full chat response time. Stress Test Questions Question A: What does FR-006 require? Expected source: product requirements document. Expected answer: a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. Question B: What path stores data on EC2? Expected source: AWS deployment runbook. Expected answer: /opt/agentic-crag/data. Question C: What is the Q3 Groq API budget? Expected source: budget workbook. Expected answer: 75 dollars. Question D: Which risk has the highest probability score? Expected source: risk workbook. Expected answer: R-004, missing source citations, probability 0.70. Question E: Is authentication included in the current release? Expected source: product requirements document. Expected answer: no, authentication is not included. Question F: What is the company payroll for 2026? Expected answer: not present in the documents, so the system should abstain. Pass Criteria For a recruiter demo, the system should achieve at least 80 percent answer correctness on the curated test questions. For source transparency, at least 80 percent of correct answers should show a supporting source snippet. For answer-not-present questions, the system should avoid inventing facts at least 90 percent of the time."
+        },
+        {
+          "query": "What does FR-005 state that is relevant to the question?",
+          "rank": 5,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0001,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-007 | Risk: User uploads confidential files to hybrid demo | Probability: 0.25 | Impact: High | Owner: Security | Mitigation: Warn that retrieved excerpts are sent to external LLM provider | Status: Mitigated"
+        },
+        {
+          "query": "What does R-004 state that is relevant to the question?",
+          "rank": 1,
+          "filename": "03_rag_evaluation_plan.docx",
+          "type": "docx",
+          "score": 0.3885,
+          "text": "Document filename: 03_rag_evaluation_plan.docx Agentic CRAG RAG Evaluation Plan Quality and Stress Testing - Demo Corpus Evaluation Goals The evaluation plan tests whether the RAG system retrieves the right evidence, answers faithfully, cites useful sources, and refuses unsupported questions. The system should be tested with exact fact questions, numeric spreadsheet questions, multi-document comparison questions, ambiguous questions, and answer-not-present questions. A good result is not only a fluent answer. The retrieved source snippet must support the answer. Primary Metrics Recall@5 measures whether the expected source appears in the top five retrieved chunks. Citation accuracy measures whether the source shown under the answer actually supports the answer. Answer correctness measures whether the final response matches the expected answer. Faithfulness measures whether the final response is fully grounded in retrieved context. Abstention accuracy measures whether the system refuses questions whose answers are absent from the documents. Latency measures indexing time, retrieval time, and full chat response time. Stress Test Questions Question A: What does FR-006 require? Expected source: product requirements document. Expected answer: a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. Question B: What path stores data on EC2? Expected source: AWS deployment runbook. Expected answer: /opt/agentic-crag/data. Question C: What is the Q3 Groq API budget? Expected source: budget workbook. Expected answer: 75 dollars. Question D: Which risk has the highest probability score? Expected source: risk workbook. Expected answer: R-004, missing source citations, probability 0.70. Question E: Is authentication included in the current release? Expected source: product requirements document. Expected answer: no, authentication is not included. Question F: What is the company payroll for 2026? Expected answer: not present in the documents, so the system should abstain. Pass Criteria For a recruiter demo, the system should achieve at least 80 percent answer correctness on the curated test questions. For source transparency, at least 80 percent of correct answers should show a supporting source snippet. For answer-not-present questions, the system should avoid inventing facts at least 90 percent of the time."
+        },
+        {
+          "query": "What does R-004 state that is relevant to the question?",
+          "rank": 2,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.1746,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-004 | Risk: Missing source citations reduce trust in RAG answers | Probability: 0.7 | Impact: High | Owner: RAG | Mitigation: Return source snippets and retrieval scores in chat responses | Status: Mitigated"
+        },
+        {
+          "query": "What does R-004 state that is relevant to the question?",
+          "rank": 3,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0108,
+          "text": "Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evaluation, with the understanding that indexing may be slower on very small machines. NFR-002: The browser interface should remain simple enough for a non-technical evaluator to upload documents and ask questions without setup instructions inside the app. NFR-003: The backend should expose explicit health checks so deployment problems can be diagnosed through curl before testing the UI. NFR-004: The repository should be small, clean, and free of generated local artifacts. NFR-005: The application should make retrieval evidence visible to reduce hallucination risk and improve trust. Known Scope Boundaries The current release does not include authentication. Public demo deployments should only be used temporarily or behind a controlled network. The current release does not include reranking. Retrieval uses vector similarity and a small top-k value suitable for a lightweight demo. The current release does not include hybrid BM25 plus vector search. Exact identifier queries may be improved in a future version. The current release does not process scanned PDFs with OCR. Text must be extractable from the uploaded files. The current release does not store collections in S3 or a managed vector database. Local disk is used for simplicity and cost control. Acceptance Criteria A reviewer can upload the full demo corpus and ask: What is FR-006? The answer should mention the retrieval-only endpoint and cite this product requirements document. A reviewer can ask whether authentication is included. The answer should state that authentication is not included in the current release. A reviewer can ask what success target is defined for fact-seeking questions. The answer should report the 85 percent target. A reviewer can ask whether scanned PDFs are supported. The answer should say OCR is not included and text must be extractable."
+        },
+        {
+          "query": "What does R-004 state that is relevant to the question?",
+          "rank": 4,
+          "filename": "06_risk_register_and_incidents.xlsx-Risk Register",
+          "type": "xlsx",
+          "score": 0.0032,
+          "text": "Document filename: 06_risk_register_and_incidents.xlsx\nSheet: Risk Register\nRisk_ID: R-005 | Risk: Pure vector retrieval misses exact IDs or codes | Probability: 0.55 | Impact: Medium | Owner: RAG | Mitigation: Consider hybrid keyword plus vector search in future | Status: Open"
+        },
+        {
+          "query": "What does R-004 state that is relevant to the question?",
+          "rank": 5,
+          "filename": "01_product_requirements.docx",
+          "type": "docx",
+          "score": 0.0014,
+          "text": "Document filename: 01_product_requirements.docx Agentic CRAG Product Requirements Document Version 2.4 - Demo Corpus Executive Summary Agentic CRAG is a document assistant for retrieval augmented generation over uploaded business documents. The product goal is to let a user upload project material, create a searchable collection, and ask grounded questions with visible source evidence. The demo release is designed for small to medium public documents. It is not intended for confidential legal, medical, financial, or customer records because the final language model answer may be generated by an external model provider. The product success target for the demo is to answer at least 85 percent of fact-seeking test questions correctly when the answer exists in the uploaded documents, while refusing unsupported questions when the answer is absent. Personas The primary persona is an early-career analyst who has several PDFs, Word files, and spreadsheets and wants quick answers without reading every page manually. The secondary persona is a recruiter or technical reviewer evaluating whether the project demonstrates practical RAG engineering, deployment awareness, and clear explanation of tradeoffs. The tertiary persona is a project manager who wants comparison summaries across release notes, budgets, risk logs, and deployment documents. Functional Requirements FR-001: The system shall accept PDF, DOCX, and XLSX uploads through a browser user interface. FR-002: The system shall create named searchable collections. A collection name must be sanitized before it is used as a storage path. FR-003: The system shall preserve uploaded source files under local storage so a collection can be reloaded after service restart. FR-004: The system shall use local embeddings to avoid sending full documents to the answer generation model. FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved. FR-006: The system shall expose a retrieval-only endpoint for debugging top retrieved chunks without spending LLM tokens. FR-007: The system shall warn users that AWS hybrid mode sends retrieved excerpts to Groq for final answer generation. FR-008: The system shall keep API keys, uploaded documents, and generated indexes out of Git. Non-Functional Requirements NFR-001: The demo must run on a low-cost EC2 instance for portfolio evalu..."
+        }
+      ],
+      "control_trace": [
+        {
+          "node": "evidence_coverage",
+          "output": "{\"coverage\":[{\"subquery\":\"What does FR-005 state that is relevant to the question?\",\"covered\":true,\"filename\":\"01_product_requirements.docx\",\"quote\":\"FR-005: The system shall return source snippets with each answer so the user can inspect which chunks were retrieved.\"},{\"subquery\":\"What does R-004 state that is relevant to the question?\",\"covered\":true,\"filename\":\"06_risk_register_and_incidents.xlsx-Risk Register\",\"quote\":\"Risk_ID: R-004 | Risk: Missing source citations reduce trust in RAG answers | Probability: 0.7 | Impact: High | Owner: RAG | Mitigation: Return source snippets and retrieval scores in chat responses | Status: Mitigated\"}]}",
+          "tokens": 696
+        },
+        {
+          "node": "synthesis",
+          "output": "FR-005 requires the system to return source snippets with each answer to allow users to inspect the evidence, thereby reducing hallucination risk and improving trust. R-004 mandates that the repository be small, clean, and free of generated local artifacts, which also supports trust by ensuring the system's data is reliable and transparent. The answer is not present in the provided documents.",
+          "tokens": 874
+        }
+      ],
+      "agent": {
+        "iterations": 2,
+        "confidence": "medium",
+        "termination_reason": "answered",
+        "query_history": [
+          "What does FR-005 state that is relevant to the question?",
+          "What does R-004 state that is relevant to the question?"
+        ],
+        "token_usage": 1570,
+        "prompt_injection_flagged": false,
+        "corrective_pass_used": false,
+        "corrective_pass_triggered": false,
+        "corrective_fallback_used": false,
+        "corrective_new_evidence": false,
+        "corrective_recovered": false,
+        "missing_subquestions": [],
+        "latency_ms": 22531.055
+      },
+      "generation_error": null,
+      "api_cost_usd": 0.0,
+      "run_fingerprint": "2faf1e6474077b7b3bcd43d7e42ca8f70d7153f41ee162ae5a7856292e18aff4"
+    }
+  ]
+}

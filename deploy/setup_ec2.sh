@@ -60,6 +60,10 @@ python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -r requirements.txt
 
+echo "Caching the local embedding and reranker models..."
+HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 ./venv/bin/python -c \
+  "from functions.rag import setup_embeddings, get_reranker; setup_embeddings(); get_reranker()"
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Creating $ENV_FILE from .env.example..."
   cp .env.example "$ENV_FILE"
